@@ -4,6 +4,9 @@ const base = "/api";
 export async function api<T=any>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   headers.set("Content-Type", "application/json");
+  // The learner's own calendar day, so streaks follow local midnight rather than UTC.
+  const d = new Date();
+  headers.set("X-Local-Date", `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
   const res = await fetch(`${base}${path}`, { ...init, headers, cache: "no-store", credentials: "same-origin" });
   if (!res.ok) {
     let detail: any = `${res.status} ${res.statusText}`;

@@ -712,3 +712,27 @@ input[type=checkbox]{width:18px;height:18px;flex:none}
 .translate-row .btn{flex:none;min-height:44px}
 .translate-msg{display:block;margin-top:6px;font-size:12px;color:var(--muted)}
 .translate-msg.err{color:var(--danger)}
+
+.json-modal{width:min(820px,100%)}
+.json-area{min-height:340px;max-height:60dvh;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;overflow:auto;tab-size:2}
+.vocab-search{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.vocab-search .input{min-height:40px}
+.vocab-manage-list{display:grid;gap:8px;max-height:55dvh;overflow:auto}
+.vocab-manage-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
+.vocab-manage-row strong{display:block}
+.vocab-manage-row small{display:block;color:var(--muted);overflow-wrap:anywhere}
+
+.streak-tag{display:inline-flex;align-items:center;gap:6px}
+.activity-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:4px 0 14px}
+.activity-stats div{border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;background:var(--surface)}
+.activity-stats strong{display:block;font:800 24px var(--font)}
+.activity-stats small{color:var(--muted)}
+.cal-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.cal-head small{color:var(--muted);font-weight:600}
+.cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.cal-dow{text-align:center;font-size:12px;color:var(--muted);font-weight:700}
+.cal-day{aspect-ratio:1;max-height:44px;display:grid;place-items:center;border-radius:10px;font-size:13px;font-weight:600;color:var(--muted);background:transparent;border:1px solid var(--line)}
+.cal-day.on{color:var(--ink);border-color:transparent;background:color-mix(in srgb,var(--accent) 35%,var(--surface))}
+.cal-day.on.l2{background:color-mix(in srgb,var(--accent) 60%,var(--surface))}
+.cal-day.on.l3{background:var(--accent);color:var(--on-accent)}
+.cal-day.today{outline:2px solid var(--primary);outline-offset:1px}

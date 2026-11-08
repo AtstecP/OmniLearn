@@ -13,9 +13,9 @@ correct_index, and valid progress statuses (see migration 0003). Python
 defaults (uuid4) let the importer build a whole nested course in memory and
 insert it in one flush.
 """
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from uuid import UUID as PythonUUID, uuid4
-from sqlalchemy import Boolean, DateTime, ForeignKey, ForeignKeyConstraint, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, ForeignKeyConstraint, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from .database import Base
@@ -156,3 +156,10 @@ class UserTestAttempt(Base):
     is_flagged_mistake: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     consecutive_correct_in_retest: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class UserActivityDay(Base):
+    __tablename__ = "user_activity_days"
+    user_id: Mapped[PythonUUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    actions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

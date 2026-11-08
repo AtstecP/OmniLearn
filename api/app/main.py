@@ -1,10 +1,11 @@
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
-from fastapi import Body, Depends, FastAPI, HTTPException, Query, Response
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import and_, delete, desc, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from .config import DEFAULT_JWT_SECRET, settings
@@ -28,6 +29,22 @@ def health(): return {"status": "ok"}
 
 
 # ---------------------------------------------------------------- helpers
+
+def local_day(x_local_date: str | None = Header(None)) -> date:
+    """The learner's calendar day: the browser sends its local date; anything odd falls back to UTC."""
+    utc = datetime.now(timezone.utc).date()
+    try:
+        d = date.fromisoformat(x_local_date or "")
+        return d if abs((d - utc).days) <= 1 else utc
+    except ValueError:
+        return utc
+
+
+def log_activity(db: Session, user: m.User, day: date, n: int = 1):
+    """Count practice on a day (committed with the caller's transaction)."""
+    stmt = pg_insert(m.UserActivityDay).values(user_id=user.id, day=day, actions=n)
+    db.execute(stmt.on_conflict_do_update(index_elements=["user_id", "day"], set_={"actions": m.UserActivityDay.actions + n}))
+
 
 def public_user(user: m.User):
     return {"id": str(user.id), "email": user.email, "full_name": user.full_name}
@@ -378,7 +395,7 @@ def get_node_progress(subject_id: UUID, node_id: UUID, db: Session = Depends(get
 
 
 @app.post("/subjects/{subject_id}/nodes/{node_id}/progress")
-def set_node_progress(subject_id: UUID, node_id: UUID, status: str = Query(..., pattern="^(in_progress|mastered)$"), db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+def set_node_progress(subject_id: UUID, node_id: UUID, status: str = Query(..., pattern="^(in_progress|mastered)$"), db: Session = Depends(get_db), user: m.User = Depends(get_current_user), day: date = Depends(local_day)):
     require_item(db, m.RoadmapNode, subject_id, node_id, user, "Lesson")
     progress = db.get(m.UserNodeProgress, (user.id, node_id))
     if not progress:
@@ -386,6 +403,8 @@ def set_node_progress(subject_id: UUID, node_id: UUID, status: str = Query(..., 
         db.add(progress)
     progress.status = status
     progress.completed_at = datetime.now(timezone.utc) if status == "mastered" else None
+    if status == "mastered":
+        log_activity(db, user, day)
     db.commit(); db.refresh(progress)
     return progress
 
@@ -420,7 +439,7 @@ def delete_test(subject_id: UUID, test_id: UUID, db: Session = Depends(get_db), 
 
 
 @app.post("/subjects/{subject_id}/tests/{test_id}/attempts")
-def submit_attempt(subject_id: UUID, test_id: UUID, payload: AttemptIn, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+def submit_attempt(subject_id: UUID, test_id: UUID, payload: AttemptIn, db: Session = Depends(get_db), user: m.User = Depends(get_current_user), day: date = Depends(local_day)):
     q = require_item(db, m.TestQuestion, subject_id, test_id, user, "Question")
     if payload.selected_index >= len(q.options):
         raise HTTPException(422, "Selected option is out of range")
@@ -431,6 +450,7 @@ def submit_attempt(subject_id: UUID, test_id: UUID, payload: AttemptIn, db: Sess
     flagged = (prev.is_flagged_mistake if prev else False) and streak < 2 if correct else True
     db.add(m.UserTestAttempt(user_id=user.id, test_id=test_id, selected_index=payload.selected_index,
                              is_correct=correct, is_flagged_mistake=flagged, consecutive_correct_in_retest=streak))
+    log_activity(db, user, day)
     db.commit()
     return {"is_correct": correct, "explanation": q.explanation, "correct_index": q.correct_index, "is_flagged_mistake": flagged, "consecutive_correct_in_retest": streak}
 
@@ -464,7 +484,7 @@ def delete_vocab(subject_id: UUID, card_id: UUID, db: Session = Depends(get_db),
 
 
 @app.post("/subjects/{subject_id}/vocab/{card_id}/review")
-def review_vocab(subject_id: UUID, card_id: UUID, payload: ReviewIn, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+def review_vocab(subject_id: UUID, card_id: UUID, payload: ReviewIn, db: Session = Depends(get_db), user: m.User = Depends(get_current_user), day: date = Depends(local_day)):
     require_item(db, m.VocabCard, subject_id, card_id, user, "Card")
     p = db.get(m.UserVocabProgress, (user.id, card_id))
     if not p:
@@ -479,6 +499,7 @@ def review_vocab(subject_id: UUID, card_id: UUID, payload: ReviewIn, db: Session
     p.interval_days = interval; p.ease_factor = round(ease, 2); p.consecutive_correct = streak
     p.due_date = now + timedelta(days=interval); p.last_reviewed_at = now
     p.status = "mastered" if interval >= 21 else "reviewing" if interval > 1 else "learning"
+    log_activity(db, user, day)
     db.commit(); db.refresh(p)
     return p
 
@@ -495,6 +516,30 @@ def list_readings(subject_id: UUID, db: Session = Depends(get_db), user: m.User 
 def delete_reading(subject_id: UUID, reading_id: UUID, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
     reading = require_item(db, m.ReadingPassage, subject_id, reading_id, user, "Reading")
     db.delete(reading); db.commit()
+
+
+# ---------------------------------------------------------------- activity
+
+@app.get("/activity")
+def get_activity(days: int = Query(400, ge=1, le=800), today: date = Depends(local_day), db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+    """Practice days for the calendar plus streaks. The current streak survives until the end of
+    today: if you have not practised yet today it counts back from yesterday."""
+    rows = db.execute(select(m.UserActivityDay.day, m.UserActivityDay.actions).where(m.UserActivityDay.user_id == user.id)
+                      .order_by(m.UserActivityDay.day)).all()
+    active = {r.day: r.actions for r in rows}
+    cursor = today if today in active else today - timedelta(days=1)
+    current = 0
+    while cursor in active:
+        current += 1
+        cursor -= timedelta(days=1)
+    longest = run = 0
+    prev = None
+    for d in sorted(active):
+        run = run + 1 if prev and (d - prev).days == 1 else 1
+        longest, prev = max(longest, run), d
+    since = today - timedelta(days=days)
+    return {"today": today.isoformat(), "current_streak": current, "longest_streak": longest, "total_days": len(active),
+            "active_today": today in active, "days": {d.isoformat(): n for d, n in active.items() if d >= since}}
 
 
 # ---------------------------------------------------------------- import / export
@@ -573,6 +618,38 @@ def import_into_subject(subject_id: UUID, payload: Any = Body(...), lesson_id: U
     counts = write_bundle(db, subject, bundle, lesson_id)
     commit_or_422(db)
     return {"subject_id": subject.id, "title": subject.title, "imported": counts}
+
+
+@app.put("/subjects/{subject_id}/content/{part}")
+def replace_content(subject_id: UUID, part: str, payload: Any = Body(...), db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+    """Replace one part of a subject with edited JSON, in one transaction. part: path (lessons + all
+    questions), vocabulary or readings. The old rows go first; their questions, attempts, mistakes,
+    progress and reading questions are deleted with them, so nothing stale is left behind."""
+    if part not in ("path", "vocabulary", "readings"):
+        raise HTTPException(404, "Unknown part")
+    subject = require_subject(db, subject_id, user)
+    try:
+        bundle = parse_bundle(payload)
+    except BundleError as e:
+        if len(e.errors) == 1 and "nothing to import" in e.errors[0]:
+            bundle = Bundle()  # clearing a part on purpose is allowed
+        else:
+            raise HTTPException(422, {"message": "The study material has problems that need fixing", "errors": e.errors})
+    keep = Bundle()
+    if part == "path":
+        keep.lessons, keep.questions = bundle.lessons, bundle.questions
+        db.execute(delete(m.TestQuestion).where(m.TestQuestion.subject_id == subject_id))
+        db.execute(delete(m.RoadmapNode).where(m.RoadmapNode.subject_id == subject_id))
+    elif part == "vocabulary":
+        keep.vocabulary = bundle.vocabulary
+        db.execute(delete(m.VocabCard).where(m.VocabCard.subject_id == subject_id))
+    else:
+        keep.readings = bundle.readings
+        db.execute(delete(m.ReadingPassage).where(m.ReadingPassage.subject_id == subject_id))
+    db.flush()
+    counts = write_bundle(db, subject, keep)
+    commit_or_422(db)
+    return {"subject_id": subject.id, "saved": counts}
 
 
 def export_question(prompt, options, answer, explanation="", tags=None) -> dict:
