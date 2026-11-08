@@ -2,10 +2,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
 
 
+# Public, local-only fallback. main.py refuses to start with it when COOKIE_SECURE is on
+# (i.e. any HTTPS deployment), so a forgotten JWT_SECRET cannot go live.
+DEFAULT_JWT_SECRET = "local-only-change-this-jwt-secret-before-deploying-123456"
+
+
 class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://omnilearn:omnilearn@db:5432/omnilearn"
     cors_origins: str = "http://localhost:3000"
-    jwt_secret: str = "local-only-change-this-jwt-secret-before-deploying-123456"
+    jwt_secret: str = DEFAULT_JWT_SECRET
     jwt_expire_minutes: int = 1440
     # Session cookie. Keep Secure on for any HTTPS deployment; local Docker over
     # plain http sets COOKIE_SECURE=false.

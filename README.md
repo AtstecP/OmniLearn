@@ -1,6 +1,8 @@
-# OmniLearn
+# Learnify
 
-OmniLearn is a full-stack, schema-driven learning system: Next.js front end, FastAPI back end, PostgreSQL storage.
+*Grab. Generate. Learn.*
+
+Learnify is a full-stack, schema-driven learning system: Next.js front end, FastAPI back end, PostgreSQL storage.
 
 ## Run locally with Docker
 
@@ -32,7 +34,7 @@ To change the schema, edit `api/app/models.py`, then add a migration with `alemb
 
 Create two Vercel projects connected to the same Git repository:
 
-1. **API project:** Root Directory `api`. Vercel detects the FastAPI app from `index.py`. Set `DATABASE_URL` and a long random `JWT_SECRET` for Production and Preview. Run `alembic upgrade head` against the production database before deploying a version with new migrations (the Vercel function does not migrate on its own).
+1. **API project:** Root Directory `api`. Vercel detects the FastAPI app from `index.py`. Set `DATABASE_URL` and a long random `JWT_SECRET` for Production and Preview. Run `alembic upgrade head` against the production database (direct, non-pooled Neon URI) before deploying a version with new migrations; the Vercel function does not migrate on its own. Use the pooled Neon URI as `DATABASE_URL` on Vercel. Generate `JWT_SECRET` with `python -c "import secrets;print(secrets.token_urlsafe(48))"`; the API refuses to start in production with a weak or default secret.
 2. **Web project:** Root Directory `web`. Set `API_ORIGIN` to the API project's deployed origin (for example `https://omnilearn-api.vercel.app`) and deploy. `API_ORIGIN` is read at build time for the `/api` proxy, so redeploy the web project after changing it. It is not a secret and is not sent to the browser.
 3. Open the web app's URL and create an account.
 

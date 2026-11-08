@@ -140,3 +140,13 @@ class BundleIn(BaseModel):
     tests: list[TestIn] = []
     cards: list[CardIn] = []
     readings: list[ReadingIn] = []
+
+
+class NodePlacement(BaseModel):
+    id: ItemId
+    parent_node_id: str | None = None
+    order_index: int = Field(ge=0)
+
+
+class RoadmapLayoutIn(BaseModel):
+    nodes: list[NodePlacement] = Field(min_length=1, max_length=2000)

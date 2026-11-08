@@ -4,15 +4,18 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import and_, delete, desc, func, select
 from sqlalchemy.orm import Session
-from .config import settings
+from .config import DEFAULT_JWT_SECRET, settings
 from .database import get_db
 from . import models as m
 from .auth import clear_session_cookie, get_current_user, hash_password, set_session_cookie, verify_password
-from .schemas import SubjectIn, NodeIn, TestIn, CardIn, ReadingIn, AttemptIn, ReviewIn, BundleIn, RegisterIn, LoginIn, PasswordChangeIn, AccountDeleteIn
+from .schemas import RoadmapLayoutIn, SubjectIn, NodeIn, TestIn, CardIn, ReadingIn, AttemptIn, ReviewIn, BundleIn, RegisterIn, LoginIn, PasswordChangeIn, AccountDeleteIn
+
+if settings.cookie_secure and (settings.jwt_secret == DEFAULT_JWT_SECRET or len(settings.jwt_secret) < 32):
+    raise RuntimeError("JWT_SECRET must be a unique random value of at least 32 characters when COOKIE_SECURE is on (production).")
 
 # The schema is managed by Alembic (`alembic upgrade head`); the API no longer
 # creates or alters tables at startup.
-app = FastAPI(title="OmniLearn API", version="2.0.0", description="Schema-driven learning engine API")
+app = FastAPI(title="Learnify API", version="2.0.0", description="Schema-driven learning engine API")
 app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -173,18 +176,53 @@ def dashboard(subject_id: str, db: Session = Depends(get_db), user: m.User = Dep
     }
 
 
+def roadmap_rows(db: Session, subject_id: str):
+    return db.scalars(select(m.RoadmapNode).where(m.RoadmapNode.subject_id == subject_id).order_by(m.RoadmapNode.order_index, m.RoadmapNode.id)).all()
+
+
+def progress_map(db: Session, subject_id: str, user: m.User):
+    rows = db.execute(select(m.UserNodeProgress.node_id, m.UserNodeProgress.status).where(
+        m.UserNodeProgress.subject_id == subject_id, m.UserNodeProgress.user_id == str(user.id))).all()
+    return {node_id: status for node_id, status in rows}
+
+
 @app.get("/subjects/{subject_id}/roadmap")
 def get_roadmap(subject_id: str, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
     require_subject(db, subject_id, user)
-    return db.scalars(select(m.RoadmapNode).where(m.RoadmapNode.subject_id == subject_id).order_by(m.RoadmapNode.order_index)).all()
+    return roadmap_rows(db, subject_id)
 
 
 @app.get("/subjects/{subject_id}/progress")
 def get_subject_progress(subject_id: str, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
     require_subject(db, subject_id, user)
-    rows = db.execute(select(m.UserNodeProgress.node_id, m.UserNodeProgress.status).where(
-        m.UserNodeProgress.subject_id == subject_id, m.UserNodeProgress.user_id == str(user.id))).all()
-    return {node_id: status for node_id, status in rows}
+    return progress_map(db, subject_id, user)
+
+
+@app.put("/subjects/{subject_id}/roadmap/layout")
+def update_roadmap_layout(subject_id: str, payload: RoadmapLayoutIn, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+    """Move and reorder roadmap nodes in one request (used by the map editor)."""
+    require_subject(db, subject_id, user)
+    nodes = {n.id: n for n in roadmap_rows(db, subject_id)}
+    for item in payload.nodes:
+        if item.id not in nodes:
+            raise HTTPException(404, f"Node not found: {item.id}")
+        if item.parent_node_id is not None and item.parent_node_id not in nodes:
+            raise HTTPException(422, f"Parent node not found: {item.parent_node_id}")
+    parents = {n.id: n.parent_node_id for n in nodes.values()}
+    for item in payload.nodes:
+        parents[item.id] = item.parent_node_id
+    for start in parents:  # reject cycles such as A under B under A
+        seen, current = set(), start
+        while current is not None:
+            if current in seen:
+                raise HTTPException(422, "A node cannot be placed under itself or its own sub-topics")
+            seen.add(current)
+            current = parents.get(current)
+    for item in payload.nodes:
+        nodes[item.id].parent_node_id = item.parent_node_id
+        nodes[item.id].order_index = item.order_index
+    db.commit()
+    return roadmap_rows(db, subject_id)
 
 
 # ---------------------------------------------------------------- roadmap
@@ -227,6 +265,14 @@ def update_node(subject_id: str, node_id: str, payload: NodeIn, db: Session = De
 @app.delete("/subjects/{subject_id}/nodes/{node_id}", status_code=204)
 def delete_node(subject_id: str, node_id: str, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
     obj = require_item(db, m.RoadmapNode, subject_id, node_id, user, "Node")
+    # Sub-topics move up one level instead of becoming main steps.
+    siblings = len([n for n in roadmap_rows(db, subject_id) if n.parent_node_id == obj.parent_node_id])
+    children = db.scalars(select(m.RoadmapNode).where(m.RoadmapNode.subject_id == subject_id, m.RoadmapNode.parent_node_id == node_id)
+                          .order_by(m.RoadmapNode.order_index)).all()
+    for i, child in enumerate(children):
+        child.parent_node_id = obj.parent_node_id
+        child.order_index = siblings + i
+    db.flush()
     db.delete(obj); db.commit()
 
 
@@ -331,6 +377,10 @@ def submit_attempt(subject_id: str, test_id: str, payload: AttemptIn, db: Sessio
 @app.get("/subjects/{subject_id}/mistakes")
 def list_mistakes(subject_id: str, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
     require_subject(db, subject_id, user)
+    return mistake_rows(db, subject_id, user)
+
+
+def mistake_rows(db: Session, subject_id: str, user: m.User):
     rows = db.execute(
         select(m.UserTestAttempt, m.TestQuestion)
         .join(m.TestQuestion, and_(m.TestQuestion.subject_id == m.UserTestAttempt.subject_id, m.TestQuestion.id == m.UserTestAttempt.test_id))
@@ -349,6 +399,10 @@ def list_mistakes(subject_id: str, db: Session = Depends(get_db), user: m.User =
 @app.get("/subjects/{subject_id}/vocab")
 def list_vocab(subject_id: str, due_only: bool = False, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
     require_subject(db, subject_id, user)
+    return vocab_rows(db, subject_id, user, due_only)
+
+
+def vocab_rows(db: Session, subject_id: str, user: m.User, due_only: bool = False):
     rows = db.execute(
         select(m.VocabCard, m.UserVocabProgress)
         .outerjoin(m.UserVocabProgress, and_(
@@ -426,6 +480,10 @@ def add_reading_questions(db: Session, subject_id: str, reading_id: str, questio
 @app.get("/subjects/{subject_id}/readings")
 def list_readings(subject_id: str, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
     require_subject(db, subject_id, user)
+    return reading_rows(db, subject_id)
+
+
+def reading_rows(db: Session, subject_id: str):
     rows = db.execute(
         select(m.ReadingPassage, m.ReadingQuestion)
         .outerjoin(m.ReadingQuestion, and_(m.ReadingQuestion.subject_id == m.ReadingPassage.subject_id, m.ReadingQuestion.reading_id == m.ReadingPassage.id))
@@ -533,18 +591,40 @@ def export_bundle(subject_id: str, db: Session = Depends(get_db), user: m.User =
     cards = db.scalars(select(m.VocabCard).where(m.VocabCard.subject_id == subject_id)).all()
     return {"subject_id": s.id, "subject_title": s.title, "target_level": s.target_level, "description": s.description,
             "nodes": [dump(x) for x in nodes], "tests": [dump(x) for x in tests], "cards": [dump(x) for x in cards],
-            "readings": list_readings(subject_id, db, user)}
+            "readings": reading_rows(db, subject_id)}
 
 
 @app.get("/subjects/{subject_id}/workspace")
 def subject_workspace(subject_id: str, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+    """Everything the UI needs for one subject, in 7 queries.
+
+    The dashboard numbers are derived from the loaded lists rather than queried
+    again; they match GET /subjects/{sid}/dashboard.
+    """
     require_subject(db, subject_id, user)
+    roadmap = roadmap_rows(db, subject_id)
+    progress = progress_map(db, subject_id, user)
+    tests = db.scalars(select(m.TestQuestion).where(m.TestQuestion.subject_id == subject_id)).all()
+    cards = vocab_rows(db, subject_id, user)
+    readings = reading_rows(db, subject_id)
+    mistakes = mistake_rows(db, subject_id, user)
+    node_ids = {n.id for n in roadmap}
+    completed = sum(1 for node_id, status in progress.items() if status == "mastered" and node_id in node_ids)
     return {
-        "roadmap": get_roadmap(subject_id, db, user),
-        "tests": list_tests(subject_id, None, None, 100, db, user),
-        "cards": list_vocab(subject_id, False, db, user),
-        "readings": list_readings(subject_id, db, user),
-        "dashboard": dashboard(subject_id, db, user),
-        "mistakes": list_mistakes(subject_id, db, user),
-        "progress": get_subject_progress(subject_id, db, user),
+        "roadmap": roadmap,
+        "tests": tests,
+        "cards": cards,
+        "readings": readings,
+        "mistakes": mistakes,
+        "progress": progress,
+        "dashboard": {
+            "subject_id": subject_id,
+            "roadmap_nodes": len(roadmap),
+            "roadmap_completed": completed,
+            "roadmap_completion_percent": round(completed * 100 / len(roadmap)) if roadmap else 0,
+            "vocab_due": sum(1 for c in cards if c["is_due"]),
+            "mistakes": len(mistakes),
+            "tests": len(tests),
+            "readings": len(readings),
+        },
     }

@@ -1,3 +1,5 @@
+from logging.config import fileConfig
+
 from alembic import context
 from sqlalchemy import create_engine, pool
 from app.config import settings
@@ -5,6 +7,8 @@ from app.database import Base
 from app import models  # noqa: F401  (registers tables on Base.metadata)
 
 target_metadata = Base.metadata
+if context.config.config_file_name:
+    fileConfig(context.config.config_file_name, disable_existing_loggers=False)  # shows "Running upgrade ..." lines
 
 
 def run_migrations_offline():
