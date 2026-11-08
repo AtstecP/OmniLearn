@@ -13,7 +13,8 @@ This file is a project handover guide. Treat the user's current request as the t
 - Database: PostgreSQL on Neon.
 - Local development: Docker Compose with PostgreSQL, FastAPI, and Next.js.
 - Account creation is the default first screen; returning users can switch to sign-in.
-- API access uses signed JWT bearer tokens. The browser stores the token in `localStorage` under `omnilearn.jwt`.
+- Sessions use a signed JWT in an `httpOnly` cookie set by the API. The browser calls the web app's own `/api/*` path, which Next.js proxies to FastAPI, so the cookie is first-party and JavaScript never sees the token.
+- The Git repository root is this `OmniLearn/` folder (GitHub `AtstecP/OmniLearn`); Vercel roots are `api` and `web`.
 
 Do not put database credentials or production secrets in source control, browser code, generated docs, or client-side environment variables. The root `.env` is ignored by Git; `.env.example` contains local examples only. A database URI that was shared in chat should be rotated before production use.
 
@@ -27,13 +28,14 @@ OmniLearn/
 ├── .env.example                # Local environment template; no production keys
 ├── api/
 │   ├── app/
-│   │   ├── main.py             # FastAPI app, startup DB setup, REST routes
-│   │   ├── auth.py             # Argon2 password and JWT helpers/dependency
+│   │   ├── main.py             # FastAPI app and REST routes
+│   │   ├── auth.py             # Argon2, JWT session cookie, auth dependency
 │   │   ├── config.py           # Pydantic settings and DB URL normalization
 │   │   ├── database.py         # SQLAlchemy engine/session/base
 │   │   ├── models.py           # PostgreSQL ORM models
 │   │   └── schemas.py          # Pydantic input/output validation
-│   ├── sql/schema.sql          # Initial PostgreSQL DDL for fresh local volumes
+│   ├── alembic.ini             # Alembic config (URL comes from DATABASE_URL)
+│   ├── migrations/versions/    # Schema migrations: 0001 baseline, 0002 subject-scoped IDs
 │   ├── index.py                # Vercel FastAPI entry point
 │   ├── requirements.txt
 │   └── Dockerfile
@@ -42,22 +44,21 @@ OmniLearn/
 │   ├── app/[[...section]]/page.tsx # Client app entry for feature routes
 │   ├── app/globals.css         # App styling
 │   ├── app/layout.tsx
-│   ├── lib/api.ts              # API client; adds bearer token and handles 401
+│   ├── lib/api.ts              # API client; same-origin /api calls, handles 401
 │   ├── lib/validate.ts         # Zod import-bundle validation
 │   ├── public/
 │   ├── package.json
-│   ├── next.config.ts          # Next standalone output for Docker
+│   ├── next.config.ts          # Standalone output; /api/* proxy to API_ORIGIN
 │   └── Dockerfile
 ├── sample_bundle.json          # Example learning materials
-├── index.html, app.js, styles.css # Earlier standalone prototype; not full-stack app
 ```
 
 ## Technology and runtime
 
 - Web: Next.js 16, React 19, TypeScript, Zod.
-- API: FastAPI, Pydantic, SQLAlchemy 2, Psycopg 3, PyJWT, Argon2.
-- Storage: PostgreSQL 16 locally or hosted PostgreSQL such as Neon.
-- Vercel deployment uses two projects from the same repository: one rooted at `api/`, one rooted at `web/` (adjust root paths if the repository root is above this project folder).
+- API: FastAPI, Pydantic, SQLAlchemy 2, Psycopg 3, PyJWT, Argon2, Alembic.
+- Storage: PostgreSQL 16 locally or hosted PostgreSQL such as Neon (15+ required by migration 0002).
+- Vercel deployment uses two projects from the same repository: one rooted at `api/`, one rooted at `web/`.
 
 ## Implemented product areas
 
@@ -86,39 +87,41 @@ The original specification also describes richer roadmap graph visualization, au
 
 1. First visit defaults to account creation; the user can switch to sign-in.
 2. `POST /auth/register` accepts normalized email, full name, and a password of at least 12 characters. Passwords are hashed with Argon2.
-3. `POST /auth/login` verifies the password and issues a signed HS256 JWT.
-4. The response includes `access_token`, `token_type`, `expires_in`, and public user details.
-5. The browser stores the token in `localStorage` as `omnilearn.jwt`; `web/lib/api.ts` sends `Authorization: Bearer <token>` on API calls.
-6. `GET /auth/me` restores the session. Invalid/expired tokens result in 401 and are removed in the browser.
-7. `get_current_user` validates JWT signature/expiry and resolves the user. Protected routes require this dependency.
+3. `POST /auth/login` (and register) verifies the password and sets a signed HS256 JWT in the `omnilearn_session` cookie: `httpOnly`, `SameSite=Lax`, `Secure` unless `COOKIE_SECURE=false` (local Docker only). The body holds `expires_in` and public user details, never the token.
+4. The browser calls `/api/...` on the web origin; `web/next.config.ts` rewrites it to `API_ORIGIN`. Same origin means the cookie is first-party.
+5. `POST /auth/logout` clears the cookie.
+6. `GET /auth/me` restores the session on page load. A 401 elsewhere fires `omnilearn:unauthorized` and returns to the sign-in screen.
+7. `get_current_user` reads the cookie (or, for API tools such as `/docs`, an `Authorization: Bearer` header), validates signature/expiry, and resolves the user. Protected routes require this dependency.
 8. Subjects have `owner_user_id`; API subject operations check ownership. Per-user progress/attempt records use the authenticated user's ID.
 9. `POST /auth/change-password` accepts the current password and a new password of at least 12 characters.
 10. `DELETE /auth/account` requires the current password and the exact confirmation text `DELETE`; PostgreSQL cascades deletion through owned subjects and their learning content.
 
-`JWT_SECRET` must be a long, unique secret in production and must be configured on the API project only. Changing it invalidates existing tokens. The current client token storage is localStorage, so avoid introducing unsafe HTML rendering or other XSS paths.
+`JWT_SECRET` must be a long, unique secret in production and must be configured on the API project only. Changing it invalidates existing sessions. The token is not readable by JavaScript, but XSS could still act as the user, so avoid unsafe HTML rendering.
 
-For compatibility with an existing database, API startup runs `Base.metadata.create_all()` and then adds `subjects.owner_user_id` and its index if missing. Existing unowned subjects are claimed by the first account that registers. New subjects are owner-scoped. Imported subject/content IDs are prefixed with a short account-derived namespace in the browser to reduce collisions in the globally keyed schema.
+The API no longer changes the schema at startup and no longer gives unowned subjects to the first account that registers; such legacy rows stay invisible. Subject IDs are global, and the API (not the browser) prefixes new ones with `u<first 8 hex of user id>_`, returning the stored ID from `POST /subjects` and from import as `subject_id`. Content IDs are scoped to their subject (see Database model).
 
 ## API route map
 
-Except for `/health`, `/auth/register`, and `/auth/login`, routes require a valid bearer token. `/auth/me` also requires a token.
+Except for `/health`, `/auth/register`, `/auth/login`, and `/auth/logout`, routes require a valid session. Content routes are nested under the owning subject; `{sid}` is the subject ID.
 
 | Area | Routes |
 | --- | --- |
-| Health and accounts | `GET /health`, `POST /auth/register`, `POST /auth/login`, `GET /auth/me`, `POST /auth/change-password`, `DELETE /auth/account` |
-| Subjects | `GET /subjects`, `POST /subjects`, `GET /subjects/{subject_id}`, `GET /subjects/{subject_id}/dashboard`, `GET /subjects/{subject_id}/roadmap` |
-| Roadmap | `POST /nodes`, `PUT /nodes/{node_id}`, `DELETE /nodes/{node_id}`, `DELETE /nodes/{node_id}/tests/{test_id}`, `GET /nodes/{node_id}/progress`, `POST /nodes/{node_id}/progress` |
-| Tests | `GET /tests`, `POST /tests`, `PUT /tests/{test_id}`, `DELETE /tests/{test_id}`, `POST /tests/{test_id}/attempts`, `GET /mistakes` |
-| Vocabulary | `GET /vocab`, `POST /vocab`, `PUT /vocab/{card_id}`, `DELETE /vocab/{card_id}`, `POST /vocab/{card_id}/review` |
-| Readings | `GET /readings`, `POST /readings`, `PUT /readings/{reading_id}`, `DELETE /readings/{reading_id}` |
-| Bundles | `POST /subjects/{subject_id}/import`, `GET /subjects/{subject_id}/export` |
-| Workspace | `GET /subjects/{subject_id}/workspace`, a combined subject data response for initial page loading |
+| Health and accounts | `GET /health`, `POST /auth/register`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, `POST /auth/change-password`, `DELETE /auth/account` |
+| Subjects | `GET /subjects`, `POST /subjects`, `GET /subjects/{sid}`, `GET /subjects/{sid}/dashboard`, `GET /subjects/{sid}/roadmap`, `GET /subjects/{sid}/progress` |
+| Roadmap | `POST /subjects/{sid}/nodes`, `PUT` / `DELETE /subjects/{sid}/nodes/{node_id}`, `DELETE /subjects/{sid}/nodes/{node_id}/tests/{test_id}`, `GET` / `POST /subjects/{sid}/nodes/{node_id}/progress` |
+| Tests | `GET` / `POST /subjects/{sid}/tests`, `PUT` / `DELETE /subjects/{sid}/tests/{test_id}`, `POST /subjects/{sid}/tests/{test_id}/attempts`, `GET /subjects/{sid}/mistakes` |
+| Vocabulary | `GET` / `POST /subjects/{sid}/vocab`, `PUT` / `DELETE /subjects/{sid}/vocab/{card_id}`, `POST /subjects/{sid}/vocab/{card_id}/review` |
+| Readings | `GET` / `POST /subjects/{sid}/readings`, `PUT` / `DELETE /subjects/{sid}/readings/{reading_id}` |
+| Bundles | `POST /subjects/{sid}/import`, `GET /subjects/{sid}/export` |
+| Workspace | `GET /subjects/{sid}/workspace`, a combined subject data response for initial page loading |
+
+Request bodies may omit `subject_id`; the path decides it.
 
 Interactive API docs are available at `/docs` in local development. If `/auth/register` returns 404 but the source contains that route, rebuild/recreate the API container: the Docker image copies API source at build time and does not mount it live.
 
 ## Database model
 
-The ORM and SQL schema include:
+The schema is defined by Alembic migrations in `api/migrations/versions` and mirrored by `api/app/models.py`. Tables:
 
 - `users`: account identity, email, Argon2 hash, creation time.
 - `subjects`: top-level learning workspace, optional owner reference.
@@ -131,7 +134,9 @@ The ORM and SQL schema include:
 - `reading_passages`: passage content and level.
 - `reading_questions`: ordered multiple-choice comprehension questions.
 
-Important integrity behavior: child content references its subject; deleting a subject cascades to its content. Roadmap nodes and tests can link, while tests remain in the independent test bank. Reading questions cascade with their passage. Vocabulary progress is unique per user/card; roadmap progress is unique per user/node.
+Keys: `roadmap_nodes`, `tests`, `vocab_cards`, and `reading_passages` have primary key `(subject_id, id)`; `reading_questions` has `(subject_id, reading_id, id)`. Progress and attempt tables carry `subject_id` and use composite foreign keys. An item ID only needs to be unique within its subject. Older rows keep their browser-prefixed IDs (`u1a2b3c4d_...`).
+
+Important integrity behavior: child content references its subject; deleting a subject cascades to its content. Deleting a node sets `tests.node_id` and child `parent_node_id` to NULL (`ON DELETE SET NULL (column)`). Roadmap nodes and tests can link, while tests remain in the independent test bank. Reading questions cascade with their passage. Vocabulary progress is unique per user/subject/card; roadmap progress is unique per user/subject/node.
 
 ## Environment variables
 
@@ -143,9 +148,10 @@ Root `.env.example` documents local settings:
 | `POSTGRES_PASSWORD` | Local Compose DB | Local container password only; not used to authenticate to Neon. |
 | `CORS_ORIGINS` | API | Comma-separated allowed browser origins, no trailing slash. |
 | `JWT_SECRET` | API | Signing key for JWT access tokens. Set a unique random production value. |
-| `NEXT_PUBLIC_API_URL` | Web | API base URL compiled into the browser app; local default is `http://localhost:8000`. |
+| `COOKIE_SECURE` | API | `true` by default; Compose sets `false` because local Docker serves plain http. |
+| `API_ORIGIN` | Web (build time) | Origin the `/api/*` proxy forwards to. Compose: `http://api:8000`. Vercel: the API project's origin. Not sent to the browser and not a secret. |
 
-The API accepts both `postgresql://` and `postgresql+psycopg://`; config normalizes the former to Psycopg 3. Never put `DATABASE_URL` or `JWT_SECRET` in `NEXT_PUBLIC_*` variables.
+The API accepts both `postgresql://` and `postgresql+psycopg://`; config normalizes the former to Psycopg 3. Never put `DATABASE_URL` or `JWT_SECRET` in `NEXT_PUBLIC_*` variables. The web app currently uses no `NEXT_PUBLIC_*` variables.
 
 ## Local development
 
@@ -168,26 +174,25 @@ docker compose up --build -d api
 docker compose logs -f api
 ```
 
-The named `omnilearn-db` volume persists local data. `api/sql/schema.sql` is mounted as a Postgres initialization script and runs only when Postgres initializes a new data directory. It will not rerun just because the container restarts. Independently, API startup creates missing ORM tables and applies the owner-column compatibility change. `docker compose down -v` erases the local DB volume and all its data; do not use it unless that deletion is intended.
+The named `omnilearn-db` volume persists local data. The API container runs `alembic upgrade head` before starting uvicorn, so whichever database `DATABASE_URL` points to (local or Neon) is migrated on start. Each migration is one transaction. Add schema changes as new migrations (`alembic revision -m ...` in `api/`); never edit an applied one. `docker compose down -v` erases the local DB volume and all its data; do not use it unless that deletion is intended.
 
-To point the API at Neon for local work, set `DATABASE_URL` in the root `.env`. Compose still starts its local Postgres service, but the API uses the configured URI. Keep the URI server-side and rotate any credentials previously shared outside the secret manager.
+To point the API at Neon for local work, set `DATABASE_URL` in the root `.env`. Compose still starts its local Postgres service, but the API uses the configured URI, and its migrations run against Neon. Take a Neon backup or branch before starting a build with new migrations. Keep the URI server-side and rotate any credentials previously shared outside the secret manager.
 
 ## Vercel + Neon deployment
 
 Create two Vercel projects from the repository:
 
-1. API project root: `outputs/OmniLearn/api` if the repository root is the parent directory, or `api` if OmniLearn itself is the root. Use the Python entry point `index.py` and `requirements.txt`.
-2. Set API project variables: `DATABASE_URL`, a unique `JWT_SECRET`, and `CORS_ORIGINS` containing the deployed web origin. Add required values to Production and Preview environments.
-3. Web project root: `outputs/OmniLearn/web` or `web`, matching the repository layout.
-4. Set `NEXT_PUBLIC_API_URL` to the deployed API origin and redeploy the web project. Since this is a public build-time variable, it must contain no secrets.
-5. Add the stable web domain to API `CORS_ORIGINS`; preview deployments need their origin allowed too, or use a stable preview domain.
-6. Confirm the API's `/health` and `/docs`, then create an account on the web app.
+1. API project root: `api`. Use the Python entry point `index.py` and `requirements.txt`.
+2. Set API project variables: `DATABASE_URL` and a unique `JWT_SECRET` for Production and Preview. `CORS_ORIGINS` is only needed for callers other than the web proxy.
+3. Run `alembic upgrade head` against Neon before deploying a version with new migrations; the Vercel function does not migrate.
+4. Web project root: `web`. Set `API_ORIGIN` to the deployed API origin and redeploy (it is compiled into the proxy rewrite at build time).
+5. Confirm the API's `/health` and `/docs`, then create an account on the web app.
 
 No Neon API key is used by this app; the FastAPI server connects through `DATABASE_URL`. Vercel deploys the web and API separately. Docker is for local development, not required as a production API host in this setup.
 
 ## Content bundle format
 
-The canonical import bundle is an object with `subject_id`, optional `subject_title`, `target_level`, `description`, and arrays `nodes`, `tests`, `cards`, and `readings`. Arrays may be omitted and default to empty, but at least one content item is required. Each item has a stable `id`; imported item subject IDs are normalized to the selected subject. The browser accepts common aliases such as `roadmap_nodes`, `lessons`, `vocab_cards`, and fenced JSON, then maps them into the canonical schema. Node `test_ids` and test `node_id` connect the roadmap to the independent test bank. Reading question IDs must be globally unique in the database. Subject creation and its initial content import happen in one API request. See `sample_bundle.json` and `web/lib/validate.ts` for the concrete schema.
+The canonical import bundle is an object with `subject_id`, optional `subject_title`, `target_level`, `description`, and arrays `nodes`, `tests`, `cards`, and `readings`. Arrays may be omitted and default to empty, but at least one content item is required. Each item has a stable `id` (max 64 characters) that only needs to be unique within its subject; item `subject_id` fields are ignored and set to the resolved subject. The browser accepts common aliases such as `roadmap_nodes`, `lessons`, `vocab_cards`, and fenced JSON, then maps them into the canonical schema. Node `test_ids` and test `node_id` connect the roadmap to the independent test bank. Reading question IDs only need to be unique within their reading. Subject creation and its initial content import happen in one API request; the response's `subject_id` is the stored (namespaced) ID. See `sample_bundle.json` and `web/lib/validate.ts` for the concrete schema.
 
 Typical workflow: create or select a subject, use **Import materials**, paste or choose JSON, validate, then import. Export produces one JSON snapshot. Copy AI prompts from the relevant learning area and ask an external model to return JSON matching the example; validate the generated content before importing.
 
@@ -196,10 +201,11 @@ Typical workflow: create or select a subject, use **Import materials**, paste or
 - Keep database passwords and JWT signing keys out of tracked files and browser code. Do not copy values from `.env` into documentation or logs.
 - Add authentication dependencies and ownership checks to any new account data routes. Test cross-account access behavior when changing API ownership logic, if asked to run verification.
 - When changing Pydantic schemas, keep `web/lib/validate.ts`, API schemas, and import/export mappings aligned.
-- Database primary IDs for learning records are strings and globally unique, not composite `(owner_id, id)` keys. Preserve namespacing or handle collisions deliberately.
-- A 404 on `/auth/register` usually indicates a stale API image or a web app pointed at a different API. Check `NEXT_PUBLIC_API_URL`, rebuild the API container, and inspect `/openapi.json` or `/docs`.
+- Learning-record keys are composite `(subject_id, id)`. Always look items up with both parts (`db.get(Model, (subject_id, item_id))`) and nest new content routes under `/subjects/{sid}`.
+- A 404 on `/auth/register` usually indicates a stale API image or a web app pointed at a different API. Check the web build's `API_ORIGIN`, rebuild the API container, and inspect `/openapi.json` or `/docs`.
 - After importing, the importer checks that saved item counts match submitted counts, reloads the combined workspace data, and then closes the import window. Import and validation errors stay visible in that window.
 - The initial AI prompt explicitly asks for at least three populated lesson nodes. The import confirmation reports counts of saved lessons, questions, vocabulary cards, and readings.
+- There is no automated test suite yet.
 - Next's Docker build uses standalone output. A native Windows `npm run build` previously completed compilation, type-checking, and page generation, then failed while copying `.next/standalone` traced files with `EPERM`. This was a Windows filesystem limitation observed in that environment; if it recurs in Docker, inspect the Docker build output and permissions separately.
 - Do not remove the Compose volume as a routine troubleshooting step; it contains the local database.
 

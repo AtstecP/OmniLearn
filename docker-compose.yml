@@ -10,7 +10,6 @@ services:
       - "5432:5432"
     volumes:
       - omnilearn-db:/var/lib/postgresql/data
-      - ./api/sql/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U omnilearn -d omnilearn"]
       interval: 5s
@@ -23,6 +22,8 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://omnilearn:omnilearn-local-only@db:5432/omnilearn}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       JWT_SECRET: ${JWT_SECRET:-local-compose-secret-change-this-before-deploying-123456}
+      # Local Docker serves plain http; keep the default (true) for HTTPS deployments.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
     ports:
       - "8000:8000"
     healthcheck:
@@ -37,10 +38,9 @@ services:
     build:
       context: ./web
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        # The web server proxies /api/* to this origin over the Compose network.
+        API_ORIGIN: ${API_ORIGIN:-http://api:8000}
     restart: unless-stopped
-    environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     ports:
       - "3000:3000"
     depends_on:

@@ -1,13 +1,17 @@
-from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Annotated
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 
 class ORM(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+ItemId = Annotated[str, Field(min_length=1, max_length=64)]
+
+
 class SubjectIn(BaseModel):
-    id: str = Field(min_length=1, max_length=64)
+    # Optional slug; the API namespaces it per owner and returns the stored ID.
+    id: str | None = Field(default=None, max_length=64)
     title: str = Field(min_length=1, max_length=255)
     description: str | None = None
     target_level: str | None = None
@@ -56,8 +60,8 @@ class AccountDeleteIn(BaseModel):
 
 
 class NodeIn(BaseModel):
-    id: str = Field(min_length=1, max_length=64)
-    subject_id: str
+    id: ItemId
+    subject_id: str | None = None
     parent_node_id: str | None = None
     title: str
     level: str | None = None
@@ -68,8 +72,8 @@ class NodeIn(BaseModel):
 
 
 class TestIn(BaseModel):
-    id: str
-    subject_id: str
+    id: ItemId
+    subject_id: str | None = None
     node_id: str | None = None
     prompt: str
     options: list[str] = Field(min_length=2)
@@ -87,8 +91,8 @@ class TestIn(BaseModel):
 
 
 class CardIn(BaseModel):
-    id: str
-    subject_id: str
+    id: ItemId
+    subject_id: str | None = None
     term: str
     part_of_speech: str | None = None
     definition: str
@@ -100,7 +104,7 @@ class CardIn(BaseModel):
 
 
 class ReadingQuestionIn(BaseModel):
-    id: str
+    id: ItemId
     prompt: str
     options: list[str] = Field(min_length=2)
     correct_index: int
@@ -109,11 +113,12 @@ class ReadingQuestionIn(BaseModel):
 
 
 class ReadingIn(BaseModel):
-    id: str
-    subject_id: str
+    id: ItemId
+    subject_id: str | None = None
     title: str
-    cefr_level: str | None = None
-    content: str
+    # Exports use the workspace names (level, passage_markdown); accept both.
+    cefr_level: str | None = Field(default=None, validation_alias=AliasChoices("cefr_level", "level"))
+    content: str = Field(validation_alias=AliasChoices("content", "passage_markdown"))
     audio_url: str | None = None
     questions: list[ReadingQuestionIn] = []
 

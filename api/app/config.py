@@ -7,6 +7,10 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
     jwt_secret: str = "local-only-change-this-jwt-secret-before-deploying-123456"
     jwt_expire_minutes: int = 1440
+    # Session cookie. Keep Secure on for any HTTPS deployment; local Docker over
+    # plain http sets COOKIE_SECURE=false.
+    cookie_name: str = "omnilearn_session"
+    cookie_secure: bool = True
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @field_validator("database_url", mode="before")
