@@ -223,7 +223,7 @@ Typical workflow: open **Import**, pick **Add to** and a prompt type, copy the A
 
 ## Working conventions and troubleshooting
 
-- Branches: `main` auto-deploys to Vercel production (API + web) against the production Neon branch. Work on `dev`. Migrations on `dev` must not run against production Neon until `dev` is merged: use a Neon dev branch or the local Compose DB for local Docker, and run `alembic upgrade head` on production right before merging. Migration 0003 is one-way (downgrade raises); take a Neon branch backup first.
+- Branches: as of 2026-11-08 the user works directly on `main` (no `dev` for now). `main` auto-deploys to Vercel production (API + web) against the production Neon database, so every push to `main` goes live. Keep changes small and tested locally first (local Compose DB or a Neon dev branch, never experiments against production data). A `dev` branch exists (merged into `main`) if the user wants it back. Production Neon is already at migration 0003, which is one-way: take a Neon backup branch before any new migration, and run `alembic upgrade head` against production before pushing code that needs it.
 
 - Keep database passwords and JWT signing keys out of tracked files and browser code. Do not copy values from `.env` into documentation or logs.
 - Add authentication dependencies and ownership checks to any new account data routes. Test cross-account access behavior when changing API ownership logic, if asked to run verification.
