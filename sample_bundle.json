@@ -1,21 +1,102 @@
 {
-  "subject_id": "french_b2",
-  "subject_title": "French B2",
+  "title": "French B2",
   "description": "Build confident upper-intermediate French.",
-  "target_level": "B2",
-  "nodes": [
-    {"id":"node_subjunctive","title":"The subjunctive mood","level":"B2","order_index":0,"prerequisites":[],"content_markdown":"# Le subjonctif\n\nThe subjunctive expresses wishes, necessity, emotion, and doubt. It often follows **que**.\n\n## Common triggers\n\n- Il faut que — it is necessary that\n- Je veux que — I want that\n- Bien que — although\n\n## Irregular forms\n\nÊtre → *sois*, avoir → *aie*, faire → *fasse*, aller → *aille*.","test_ids":["q_subj_01","q_subj_02"]},
-    {"id":"node_argument","title":"Build a clear argument","level":"B2","order_index":1,"prerequisites":["node_subjunctive"],"content_markdown":"# Construire un argument\n\nA clear argument has a claim, evidence, and a link between the two. Use connectors to guide the reader.\n\n- Tout d’abord — first of all\n- En revanche — on the other hand\n- Par conséquent — consequently\n- En somme — in short","test_ids":[]}
+  "level": "B2",
+  "lessons": [
+    {
+      "title": "The subjunctive mood",
+      "level": "B2",
+      "content": "# Le subjonctif\n\nThe subjunctive expresses wishes, necessity, emotion, and doubt. It often follows **que**.\n\n## Common triggers\n\n- Il faut que — it is necessary that\n- Je veux que — I want that\n- Bien que — although\n\n## Irregular forms\n\nÊtre → *sois*, avoir → *aie*, faire → *fasse*, aller → *aille*.",
+      "questions": [
+        {
+          "question": "Il faut que nous _____ (partir) tout de suite.",
+          "options": [
+            "partons",
+            "partions",
+            "partirons",
+            "partirions"
+          ],
+          "answer": 1,
+          "explanation": "Partions is subjunctive. Il faut que expresses necessity and triggers the subjunctive; the other choices are indicative, future, and conditional.",
+          "tags": [
+            "grammar",
+            "subjunctive"
+          ]
+        },
+        {
+          "question": "Bien qu’il _____ (faire) froid, nous sortons.",
+          "options": [
+            "fait",
+            "fasse",
+            "fera",
+            "ferait"
+          ],
+          "answer": 1,
+          "explanation": "Fasse is the subjunctive form of faire. Bien que introduces a concessive clause and requires the subjunctive.",
+          "tags": [
+            "grammar",
+            "subjunctive"
+          ]
+        }
+      ],
+      "lessons": [
+        {
+          "title": "Build a clear argument",
+          "level": "B2",
+          "content": "# Construire un argument\n\nA clear argument has a claim, evidence, and a link between the two. Use connectors to guide the reader.\n\n- Tout d’abord — first of all\n- En revanche — on the other hand\n- Par conséquent — consequently\n- En somme — in short"
+        }
+      ]
+    }
   ],
-  "tests": [
-    {"id":"q_subj_01","node_id":"node_subjunctive","tags":["grammar","subjunctive"],"prompt":"Il faut que nous _____ (partir) tout de suite.","options":["partons","partions","partirons","partirions"],"correct_index":1,"explanation":"Partions is subjunctive. Il faut que expresses necessity and triggers the subjunctive; the other choices are indicative, future, and conditional."},
-    {"id":"q_subj_02","node_id":"node_subjunctive","tags":["grammar","subjunctive"],"prompt":"Bien qu’il _____ (faire) froid, nous sortons.","options":["fait","fasse","fera","ferait"],"correct_index":1,"explanation":"Fasse is the subjunctive form of faire. Bien que introduces a concessive clause and requires the subjunctive."}
-  ],
-  "cards": [
-    {"id":"v_pourtant","term":"pourtant","part_of_speech":"adverb","definition":"however; nevertheless","example_sentence":"Il pleuvait, pourtant nous sommes sortis.","tags":["connectors"]},
-    {"id":"v_envisager","term":"envisager","part_of_speech":"verb","definition":"to consider; to contemplate","example_sentence":"Nous envisageons plusieurs solutions.","tags":["work"]}
+  "vocabulary": [
+    {
+      "term": "pourtant",
+      "definition": "however; nevertheless",
+      "part_of_speech": "adverb",
+      "example": "Il pleuvait, pourtant nous sommes sortis.",
+      "tags": [
+        "connectors"
+      ]
+    },
+    {
+      "term": "envisager",
+      "definition": "to consider; to contemplate",
+      "part_of_speech": "verb",
+      "example": "Nous envisageons plusieurs solutions.",
+      "tags": [
+        "work"
+      ]
+    }
   ],
   "readings": [
-    {"id":"read_remote","title":"Le télétravail : une nouvelle façon de travailler","cefr_level":"B2","content":"Depuis quelques années, le télétravail transforme l’organisation des entreprises. Pour de nombreux salariés, il offre une plus grande souplesse et réduit le temps passé dans les transports.\n\nCependant, certains employés se sentent isolés et la frontière entre le bureau et la maison devient floue. Les équipes doivent donc inventer de nouvelles façons de communiquer.\n\nEn somme, le succès du télétravail dépend de règles claires, d’outils adaptés et d’un dialogue régulier entre collègues.","questions":[{"id":"rq_remote_01","prompt":"Quel avantage est cité dans le premier paragraphe ?","options":["Une hausse générale des salaires","La réduction du temps de transport","La disparition du travail en équipe","Une semaine plus courte"],"correct_index":1,"explanation":"Le texte indique que le télétravail réduit le temps passé dans les transports.","order_index":0},{"id":"rq_remote_02","prompt":"Quelle difficulté est mentionnée ?","options":["Le coût du matériel","L’isolement de certains employés","La baisse de qualité","Le manque de clients"],"correct_index":1,"explanation":"Le deuxième paragraphe explique que certains employés se sentent isolés.","order_index":1}]}
+    {
+      "title": "Le télétravail : une nouvelle façon de travailler",
+      "level": "B2",
+      "content": "Depuis quelques années, le télétravail transforme l’organisation des entreprises. Pour de nombreux salariés, il offre une plus grande souplesse et réduit le temps passé dans les transports.\n\nCependant, certains employés se sentent isolés et la frontière entre le bureau et la maison devient floue. Les équipes doivent donc inventer de nouvelles façons de communiquer.\n\nEn somme, le succès du télétravail dépend de règles claires, d’outils adaptés et d’un dialogue régulier entre collègues.",
+      "questions": [
+        {
+          "question": "Quel avantage est cité dans le premier paragraphe ?",
+          "options": [
+            "Une hausse générale des salaires",
+            "La réduction du temps de transport",
+            "La disparition du travail en équipe",
+            "Une semaine plus courte"
+          ],
+          "answer": 1,
+          "explanation": "Le texte indique que le télétravail réduit le temps passé dans les transports."
+        },
+        {
+          "question": "Quelle difficulté est mentionnée ?",
+          "options": [
+            "Le coût du matériel",
+            "L’isolement de certains employés",
+            "La baisse de qualité",
+            "Le manque de clients"
+          ],
+          "answer": 1,
+          "explanation": "Le deuxième paragraphe explique que certains employés se sentent isolés."
+        }
+      ]
+    }
   ]
 }

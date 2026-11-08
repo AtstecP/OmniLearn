@@ -1,20 +1,29 @@
+"""Request bodies for the small, single-item endpoints.
+
+Bulk study material goes through app/bundle.py instead. No request accepts an
+ID for a new item: the server generates every ID. Extra fields (for example an
+"id" an older client still sends) are ignored.
+"""
 from typing import Annotated
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from uuid import UUID
+from pydantic import AfterValidator, BaseModel, Field, field_validator, model_validator
 
 
-class ORM(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+def _clean_title(value: str) -> str:
+    value = (value or "").strip()
+    if not value:
+        raise ValueError("must not be empty")
+    return value
 
 
-ItemId = Annotated[str, Field(min_length=1, max_length=64)]
+Title = Annotated[str, Field(min_length=1, max_length=255), AfterValidator(_clean_title)]
 
 
 class SubjectIn(BaseModel):
-    # Optional slug; the API namespaces it per owner and returns the stored ID.
-    id: str | None = Field(default=None, max_length=64)
-    title: str = Field(min_length=1, max_length=255)
-    description: str | None = None
-    target_level: str | None = None
+    title: Title
+    description: str | None = Field(default=None, max_length=5000)
+    target_level: str | None = Field(default=None, max_length=32)
+
 
 
 class RegisterIn(BaseModel):
@@ -59,92 +68,77 @@ class AccountDeleteIn(BaseModel):
     confirmation: str
 
 
-class NodeIn(BaseModel):
-    id: ItemId
-    subject_id: str | None = None
-    parent_node_id: str | None = None
-    title: str
-    level: str | None = None
-    order_index: int = 0
-    prerequisites: list[str] = []
-    content_markdown: str
-    test_ids: list[str] = []
+class SubjectDeleteIn(BaseModel):
+    confirmation: str = Field(description="The subject's exact title, to confirm deletion")
 
 
-class TestIn(BaseModel):
-    id: ItemId
-    subject_id: str | None = None
-    node_id: str | None = None
-    prompt: str
-    options: list[str] = Field(min_length=2)
-    correct_index: int
-    explanation: str = ""
-    tags: list[str] = []
-
-    @field_validator("correct_index")
-    @classmethod
-    def valid_index(cls, value, info):
-        opts = info.data.get("options", [])
-        if opts and not 0 <= value < len(opts):
-            raise ValueError("correct_index must point to an option")
-        return value
+class NodeCreate(BaseModel):
+    title: Title
+    content_markdown: str = Field(default="", max_length=200_000)
+    level: str | None = Field(default=None, max_length=32)
+    parent_node_id: UUID | None = None
+    order_index: int | None = Field(default=None, ge=0)
 
 
-class CardIn(BaseModel):
-    id: ItemId
-    subject_id: str | None = None
-    term: str
-    part_of_speech: str | None = None
-    definition: str
-    example_sentence: str | None = None
-    image_url: str | None = None
-    audio_url: str | None = None
-    tags: list[str] = []
-    source: str = "manual"
+
+class NodeUpdate(BaseModel):
+    """Edits a lesson's text. Moving and reordering go through the layout endpoint."""
+    title: Title
+    content_markdown: str = Field(default="", max_length=200_000)
+    level: str | None = Field(default=None, max_length=32)
 
 
-class ReadingQuestionIn(BaseModel):
-    id: ItemId
-    prompt: str
-    options: list[str] = Field(min_length=2)
-    correct_index: int
-    explanation: str = ""
-    order_index: int = 0
+
+class TestCreate(BaseModel):
+    node_id: UUID | None = None
+    prompt: str = Field(min_length=1, max_length=5000)
+    options: list[str] = Field(min_length=2, max_length=20)
+    correct_index: int = Field(ge=0)
+    explanation: str = Field(default="", max_length=10_000)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def check(self):
+        self.prompt = _clean_title(self.prompt)
+        self.options = [o.strip() for o in self.options]
+        if any(not o for o in self.options):
+            raise ValueError("options must not be empty")
+        if self.correct_index >= len(self.options):
+            raise ValueError("correct_index must point to one of the options")
+        return self
 
 
-class ReadingIn(BaseModel):
-    id: ItemId
-    subject_id: str | None = None
-    title: str
-    # Exports use the workspace names (level, passage_markdown); accept both.
-    cefr_level: str | None = Field(default=None, validation_alias=AliasChoices("cefr_level", "level"))
-    content: str = Field(validation_alias=AliasChoices("content", "passage_markdown"))
-    audio_url: str | None = None
-    questions: list[ReadingQuestionIn] = []
+class CardCreate(BaseModel):
+    term: str = Field(min_length=1, max_length=255)
+    definition: str = Field(min_length=1, max_length=20_000)
+    part_of_speech: str | None = Field(default=None, max_length=64)
+    example_sentence: str | None = Field(default=None, max_length=5000)
+    image_url: str | None = Field(default=None, max_length=1024)
+    audio_url: str | None = Field(default=None, max_length=1024)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def check(self):
+        self.term = _clean_title(self.term)
+        self.definition = _clean_title(self.definition)
+        for name in ("image_url", "audio_url"):
+            value = getattr(self, name)
+            if value is not None and not value.strip().lower().startswith(("http://", "https://")):
+                setattr(self, name, None)
+        return self
 
 
 class AttemptIn(BaseModel):
-    selected_index: int
+    selected_index: int = Field(ge=0)
 
 
 class ReviewIn(BaseModel):
     rating: int = Field(ge=0, le=3)
 
 
-class BundleIn(BaseModel):
-    subject_id: str
-    subject_title: str | None = None
-    target_level: str | None = None
-    description: str | None = None
-    nodes: list[NodeIn] = []
-    tests: list[TestIn] = []
-    cards: list[CardIn] = []
-    readings: list[ReadingIn] = []
-
-
 class NodePlacement(BaseModel):
-    id: ItemId
-    parent_node_id: str | None = None
+    id: UUID
+    parent_node_id: UUID | None = None
     order_index: int = Field(ge=0)
 
 
