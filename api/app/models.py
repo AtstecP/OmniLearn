@@ -163,3 +163,12 @@ class UserActivityDay(Base):
     user_id: Mapped[PythonUUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     day: Mapped[date] = mapped_column(Date, primary_key=True)
     actions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class UserFavorite(Base):
+    __tablename__ = "user_favorites"
+    user_id: Mapped[PythonUUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    subject_id: Mapped[PythonUUID] = mapped_column(UUID(as_uuid=True), ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), primary_key=True)
+    item_id: Mapped[PythonUUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

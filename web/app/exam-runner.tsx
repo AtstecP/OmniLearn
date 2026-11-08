@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Bookmark, ChevronLeft, ChevronRight, Grid3x3, Search, X } from "lucide-react";
+import { Bookmark, ChevronLeft, ChevronRight, Grid3x3, Search, Star, X } from "lucide-react";
 
 /*
  * Full-screen exam: one question at a time, flag for review, go back, and a
@@ -17,6 +17,8 @@ type Props = {
   timedSeconds: number; // 0 = untimed
   sectionOf?: (q: ExamQ) => string;
   onSubmit: (answers: { id: string; selected: number }[]) => Promise<void>;
+  isFavorite?: (id: string) => boolean;
+  onToggleFavorite?: (id: string) => void;
   onClose: () => void;
 };
 type Filter = "all" | "unanswered" | "flagged";
@@ -24,7 +26,7 @@ type Filter = "all" | "unanswered" | "flagged";
 const letter = (i: number) => String.fromCharCode(65 + i);
 const clock = (s: number) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
-export default function ExamRunner({ title, questions, timedSeconds, sectionOf, onSubmit, onClose }: Props) {
+export default function ExamRunner({ title, questions, timedSeconds, sectionOf, onSubmit, isFavorite, onToggleFavorite, onClose }: Props) {
   const [idx, setIdx] = useState(0);
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [flags, setFlags] = useState<Set<string>>(new Set());
@@ -170,9 +172,14 @@ export default function ExamRunner({ title, questions, timedSeconds, sectionOf, 
               <strong>Question {idx + 1}</strong> <span className="ex-of">of {total}</span>
               {section && <div className="ex-section">{section}</div>}
             </div>
+            <div className="ex-card-actions">
+            {onToggleFavorite && <button className={`btn small fav-star ${isFavorite?.(q.id) ? "on" : ""}`} aria-pressed={!!isFavorite?.(q.id)} onClick={() => onToggleFavorite(q.id)}>
+              <Star size={15} fill={isFavorite?.(q.id) ? "currentColor" : "none"} />Favorite
+            </button>}
             <button className={`btn small ex-flag ${isFlagged ? "on" : ""}`} aria-pressed={isFlagged} onClick={toggleFlag}>
               <Bookmark size={15} fill={isFlagged ? "currentColor" : "none"} />{isFlagged ? "Flagged" : "Flag for review"}
             </button>
+            </div>
           </div>
           <h2 className="ex-prompt">{q.prompt}</h2>
           <div className="ex-hint"><span>Select one answer</span><span className="ex-hint-tip">Tip: ✕ crosses out a choice</span></div>

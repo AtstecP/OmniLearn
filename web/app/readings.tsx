@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { CheckCircle2, Newspaper, Trash2 } from "lucide-react";
+import { CheckCircle2, Newspaper, Star, Trash2 } from "lucide-react";
 
 /* Reading room tiles: title, level and a "Finished" mark only. Finished marks are
    kept in this browser (localStorage, per subject); the text itself is opened on its own page. */
@@ -22,8 +22,8 @@ export function useFinishedReadings(subjectId: string) {
   return { done, set };
 }
 
-export default function ReadingTiles({ readings, done, onOpen, onDelete }: {
-  readings: R[]; done: Set<string>; onOpen: (id: string) => void; onDelete: (r: R) => void;
+export default function ReadingTiles({ readings, done, favs, onFav, onOpen, onDelete }: {
+  readings: R[]; done: Set<string>; favs: Set<string>; onFav: (id: string) => void; onOpen: (id: string) => void; onDelete: (r: R) => void;
 }) {
   return (
     <div className="topic-grid reading-grid">
@@ -39,6 +39,7 @@ export default function ReadingTiles({ readings, done, onOpen, onDelete }: {
                 {finished && <span className="tag ok"><CheckCircle2 size={13} /> Finished</span>}
               </span>
             </button>
+            <button type="button" className={`reading-fav ${favs.has(r.id) ? "on" : ""}`} aria-pressed={favs.has(r.id)} aria-label={`Favorite ${r.title}`} title="Favorite" onClick={() => onFav(r.id)}><Star size={16} fill={favs.has(r.id) ? "currentColor" : "none"} /></button>
             <button type="button" className="reading-delete" aria-label={`Delete ${r.title}`} title="Delete text" onClick={() => onDelete(r)}><Trash2 size={16} /></button>
           </div>
         );

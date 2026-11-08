@@ -283,7 +283,11 @@ def subject_workspace(subject_id: UUID, db: Session = Depends(get_db), user: m.U
     cards = vocab_rows(db, subject_id, user)
     readings = reading_rows(db, subject_id)
     mistakes = mistake_rows(db, subject_id, user)
-    return {"roadmap": roadmap, "tests": tests, "cards": cards, "readings": readings, "mistakes": mistakes, "progress": progress,
+    alive = {"lesson": {str(n["id"]) for n in roadmap}, "question": {str(t.id) for t in tests}, "reading": {str(r["id"]) for r in readings}}
+    favs = db.execute(select(m.UserFavorite.kind, m.UserFavorite.item_id).where(m.UserFavorite.user_id == user.id, m.UserFavorite.subject_id == subject_id)
+                      .order_by(m.UserFavorite.created_at.desc())).all()
+    favorites = [{"kind": k, "item_id": str(i)} for k, i in favs if str(i) in alive.get(k, ())]
+    return {"roadmap": roadmap, "tests": tests, "cards": cards, "readings": readings, "mistakes": mistakes, "progress": progress, "favorites": favorites,
             "dashboard": dashboard_numbers(subject_id, roadmap, progress, tests, cards, readings, mistakes)}
 
 
@@ -447,7 +451,7 @@ def submit_attempt(subject_id: UUID, test_id: UUID, payload: AttemptIn, db: Sess
                      .order_by(desc(m.UserTestAttempt.attempted_at)).limit(1))
     correct = payload.selected_index == q.correct_index
     streak = (prev.consecutive_correct_in_retest if prev and prev.is_flagged_mistake else 0) + 1 if correct else 0
-    flagged = (prev.is_flagged_mistake if prev else False) and streak < 2 if correct else True
+    flagged = not correct  # a correct answer takes the question out of the mistake notebook at once
     db.add(m.UserTestAttempt(user_id=user.id, test_id=test_id, selected_index=payload.selected_index,
                              is_correct=correct, is_flagged_mistake=flagged, consecutive_correct_in_retest=streak))
     log_activity(db, user, day)
@@ -540,6 +544,34 @@ def get_activity(days: int = Query(400, ge=1, le=800), today: date = Depends(loc
     since = today - timedelta(days=days)
     return {"today": today.isoformat(), "current_streak": current, "longest_streak": longest, "total_days": len(active),
             "active_today": today in active, "days": {d.isoformat(): n for d, n in active.items() if d >= since}}
+
+
+# ---------------------------------------------------------------- favorites
+
+FAVORITE_MODELS = {"lesson": (m.RoadmapNode, "Lesson"), "reading": (m.ReadingPassage, "Reading"), "question": (m.TestQuestion, "Question")}
+
+
+def favorite_target(kind: str):
+    if kind not in FAVORITE_MODELS:
+        raise HTTPException(404, "Unknown favorite type")
+    return FAVORITE_MODELS[kind]
+
+
+@app.put("/subjects/{subject_id}/favorites/{kind}/{item_id}", status_code=204)
+def add_favorite(subject_id: UUID, kind: str, item_id: UUID, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+    model, label = favorite_target(kind)
+    require_item(db, model, subject_id, item_id, user, label)
+    db.execute(pg_insert(m.UserFavorite).values(user_id=user.id, subject_id=subject_id, kind=kind, item_id=item_id).on_conflict_do_nothing())
+    db.commit()
+
+
+@app.delete("/subjects/{subject_id}/favorites/{kind}/{item_id}", status_code=204)
+def remove_favorite(subject_id: UUID, kind: str, item_id: UUID, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+    favorite_target(kind)
+    require_subject(db, subject_id, user)
+    db.execute(delete(m.UserFavorite).where(m.UserFavorite.user_id == user.id, m.UserFavorite.subject_id == subject_id,
+                                            m.UserFavorite.kind == kind, m.UserFavorite.item_id == item_id))
+    db.commit()
 
 
 # ---------------------------------------------------------------- import / export
