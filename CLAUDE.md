@@ -209,6 +209,8 @@ The canonical bundle has **no IDs**; structure comes from nesting and order (`ap
 
 `answer` may be the zero-based index, the exact option text, or a letter (A, B, ...). The parser accepts common aliases (nodes, cards, vocab, children, content_markdown, correct_index, a wrapping `{"course": {...}}`, ...) and the older flat format with `id`/`parent_node_id`/`node_id`/`test_ids`; those IDs are used only to rebuild links and are then discarded. Every import is one transaction: any error saves nothing. Limits per import: 2000 lessons, 5000 questions, 10000 cards, 500 readings, nesting up to 6 levels. Export returns the same format, so exporting and re-importing recreates a course for anyone.
 
+AI prompts (built in `copyPrompt`, home.tsx) tell the AI to answer with the finished JSON in one ```json code block (or an attached `learnify.json`), valid JSON only, no ids, no triple backticks inside content, and to return fewer lessons rather than cut the JSON off. The importer (`web/lib/extractJson.ts`) accepts whatever is pasted: bare JSON, a code block, or the AI's whole reply with chat text around it, an unclosed fence, a BOM, or trailing commas, and explains cut-off or invalid JSON in plain words. Keep the prompt wording and the extractor in step.
+
 Typical workflow: open **Import**, pick **Add to** and a prompt type, copy the AI prompt, paste the AI's JSON (or choose a file), then **Validate & import**. Errors list exact locations and keep the window open.
 
 ## Working conventions and troubleshooting
