@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, RotateCcw, Settings, Volume2, X } from "lucide-react";
+import { guessLang, langName, pickVoice } from "@/lib/speech";
 
 /*
  * Full-screen vocabulary practice.
@@ -62,31 +63,6 @@ function judge(input: string, term: string): Verdict {
   if (variants.some(v => norm(v).replace(/[.!?,;:]+$/, "") === a)) return "right";
   if (variants.some(v => plain(v) === plain(a))) return "accent";
   return "wrong";
-}
-
-// Best-effort language of the words, so the right voice is used without asking.
-function guessLang(text: string): string | null {
-  const t = text.toLowerCase();
-  const scripts: [RegExp, string][] = [[/[Ѐ-ӿ]/g, "ru"], [/[؀-ۿ]/g, "ar"], [/[぀-ヿ]/g, "ja"], [/[가-힯]/g, "ko"],
-    [/[一-鿿]/g, "zh"], [/[Ͱ-Ͽ]/g, "el"], [/[֐-׿]/g, "he"], [/[ऀ-ॿ]/g, "hi"], [/[฀-๿]/g, "th"]];
-  let best: string | null = null, bestN = 0;
-  for (const [re, code] of scripts) { const n = (t.match(re) || []).length; if (n > bestN) { best = code; bestN = n; } }
-  if (bestN >= 3) return best;
-  const count = (re: RegExp) => (t.match(re) || []).length;
-  const score: Record<string, number> = {
-    fr: count(/[éèêëàâçîïôœùû]/g), es: count(/[ñ¿¡]/g) * 4 + count(/[áíóú]/g), de: count(/[äöüß]/g) * 2, pt: count(/[ãõ]/g) * 4,
-  };
-  const ranked = Object.entries(score).sort((a, b) => b[1] - a[1]);
-  return ranked[0][1] >= 2 && ranked[0][1] >= (ranked[1]?.[1] || 0) * 1.5 ? ranked[0][0] : null;
-}
-function langName(code: string): string {
-  try { return new Intl.DisplayNames([navigator.language || "en"], { type: "language" }).of(code) || code; } catch { return code; }
-}
-function pickVoice(voices: SpeechSynthesisVoice[], lang: string | null, uri?: string): SpeechSynthesisVoice | undefined {
-  if (uri) { const v = voices.find(x => x.voiceURI === uri); if (v) return v; }
-  if (!lang) return undefined;
-  const m = voices.filter(v => v.lang.toLowerCase().replace("_", "-").startsWith(lang));
-  return m.find(v => v.localService) || m[0];
 }
 
 type Props = {

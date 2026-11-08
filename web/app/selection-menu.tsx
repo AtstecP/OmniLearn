@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { BookmarkPlus } from "lucide-react";
+import { BookmarkPlus, Volume2 } from "lucide-react";
 
 /*
  * "Add to vocabulary" for selected text. Select a word or phrase inside any element
@@ -45,7 +45,7 @@ function read(): { term: string; sentence: string; rect: DOMRect } | null {
   return { term, sentence, rect: range.getBoundingClientRect() };
 }
 
-export default function SelectionMenu({ onAdd }: { onAdd: (term: string, sentence: string) => void }) {
+export default function SelectionMenu({ onAdd, onRead }: { onAdd: (term: string, sentence: string) => void; onRead?: (text: string) => void }) {
   const [menu, setMenu] = useState<Menu | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const timer = useRef<number>(0);
@@ -100,6 +100,12 @@ export default function SelectionMenu({ onAdd }: { onAdd: (term: string, sentenc
         onClick={() => { const m = menu; setMenu(null); window.getSelection()?.removeAllRanges(); onAdd(m.term, m.sentence); }}>
         <BookmarkPlus size={16} />Add “{shown}” to vocabulary
       </button>
+      {onRead && (
+        <button type="button" role="menuitem" onMouseDown={e => e.preventDefault()}
+          onClick={() => { const m = menu; setMenu(null); onRead(m.term); }}>
+          <Volume2 size={16} />Read it
+        </button>
+      )}
     </div>
   );
 }
