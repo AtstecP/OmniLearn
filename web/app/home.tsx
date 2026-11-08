@@ -111,7 +111,7 @@ export default function Home(){
    context="Prepare useful vocabulary for "+subjectName+" at "+level+". Topic: "+(vocabTopic==="All words"?"choose a useful topic":vocabTopic)+".";
   }else if(kind==="reading"){
    schema={readings:[{title:"Passage title",level:current?.target_level||"Level",content:"Passage in Markdown",questions:[q]}]};
-   context="Create an engaging reading passage for "+subjectName+" at "+level+", with 3-5 comprehension questions.";
+   context="Create engaging reading passages (1-3, each 150-400 words) about the subject \""+subjectName+"\" at "+level+", each with 3-5 comprehension questions. Stay on this subject and use the topic or source text given at the end of this prompt."+(readings.length?"\nTexts that already exist (write different ones, do not repeat these titles): "+readings.map(x=>x.title).join("; ")+".":"");
   }else{
    let lesson=(page==="lesson"||page==="lesson-test")?activeNode:null;
    schema={questions:[{...q,tags:["topic"]}]};
@@ -123,6 +123,7 @@ export default function Home(){
    +"\n\nThe JSON must match this example:\n"+JSON.stringify(schema,null,2)
    +"\n\nRules:\n- Valid JSON only: double-quoted keys and strings, no comments, no trailing commas.\n- Do not add any \"id\" fields; structure comes from nesting and order.\n- \"answer\" is the zero-based index of the correct option (0 = first option). Each question has 2-6 options and exactly one correct answer.\n- Write lesson and reading content in Markdown. Inside JSON strings write line breaks as \\n and escape double quotes as \\\". Do not use triple backticks inside the content (use indented or inline code instead) so the code block stays intact.\n- Give a clear explanation for every answer.\n- Keep it complete: if the course is too long for one reply, return fewer lessons per reply instead of cutting the JSON off.";
   if(kind==="initial")prompt+="\n\nYOUR SUBJECT AND LEARNING GOALS:\n[Describe what you want to learn, your current level, goals, and topics to include.]";
+  if(kind==="reading")prompt+="\n\nTOPIC, SOURCE TEXT, OR REQUEST FOR THE READING:\n[Write the topic or situation you want, paste a text to turn into a reading, or delete this line to let the AI choose a topic within the subject.]";
   if(kind==="vocab")prompt+="\n\nUSER TOPIC, SOURCE MATERIAL, OR REQUIRED WORDS:\n[Write a topic, paste source content, or list the exact vocabulary you want included here.]";
   setPromptForImport("");try{await navigator.clipboard.writeText(prompt);message("Prompt copied. Edit its request section before using it.")}catch{setPromptForImport(prompt);message("Clipboard access is blocked. Copy the prompt text shown here.")}
  } const defaultPromptKind=subjects.length===0?"initial":page==="lesson"||page==="lesson-test"||page==="tests"||page==="mistakes"?"test":page==="vocabulary"||page==="vocabulary-practice"?"vocab":page==="readings"?"reading":"roadmap";
