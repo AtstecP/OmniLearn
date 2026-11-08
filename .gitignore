@@ -1,0 +1,67 @@
+# ---------------------------------------------------------------
+# OmniLearn .gitignore
+# ---------------------------------------------------------------
+
+# ----- Secrets / environment -----------------------------------
+# Real env files hold DATABASE_URL and JWT_SECRET: never commit.
+.env
+.env.*
+**/.env
+**/.env.*
+# Keep the documented local templates
+!.env.example
+!**/.env.example
+
+# ----- Vercel ---------------------------------------------------
+.vercel
+**/.vercel
+
+# ----- Node / Next.js (web/) -----------------------------------
+**/node_modules/
+**/.next/
+**/out/
+**/build/
+**/.turbo/
+**/coverage/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# ----- Python / FastAPI (api/) ---------------------------------
+**/__pycache__/
+**/*.py[cod]
+*$py.class
+**/.venv/
+**/venv/
+**/env/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.coverage
+**/htmlcov/
+*.egg-info/
+**/dist/
+
+# ----- Local database / Docker leftovers -----------------------
+*.sqlite
+*.sqlite3
+*.db
+pgdata/
+docker-compose.override.yml
+
+# ----- Logs -----------------------------------------------------
+*.log
+logs/
+
+# ----- Editors / OS ---------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
