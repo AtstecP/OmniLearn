@@ -33,9 +33,10 @@ OmniLearn/
 │   │   ├── config.py           # Pydantic settings and DB URL normalization
 │   │   ├── database.py         # SQLAlchemy engine/session/base
 │   │   ├── models.py           # PostgreSQL ORM models
-│   │   └── schemas.py          # Pydantic input/output validation
+│   │   ├── schemas.py          # Pydantic bodies for single-item endpoints
+│   │   └── bundle.py           # ID-free import format: parse, validate, normalise
 │   ├── alembic.ini             # Alembic config (URL comes from DATABASE_URL)
-│   ├── migrations/versions/    # Schema migrations: 0001 baseline, 0002 subject-scoped IDs
+│   ├── migrations/versions/    # 0001 baseline, 0002 subject-scoped IDs, 0003 UUID keys + DB checks
 │   ├── index.py                # Vercel FastAPI entry point
 │   ├── requirements.txt
 │   └── Dockerfile
@@ -45,7 +46,6 @@ OmniLearn/
 │   ├── app/globals.css         # App styling
 │   ├── app/layout.tsx
 │   ├── lib/api.ts              # API client; same-origin /api calls, handles 401
-│   ├── lib/validate.ts         # Zod import-bundle validation
 │   ├── public/
 │   ├── package.json
 │   ├── next.config.ts          # Standalone output; /api/* proxy to API_ORIGIN
@@ -55,7 +55,7 @@ OmniLearn/
 
 ## Technology and runtime
 
-- Web: Next.js 16, React 19, TypeScript, Zod.
+- Web: Next.js 16, React 19, TypeScript, lucide-react, react-markdown.
 - API: FastAPI, Pydantic, SQLAlchemy 2, Psycopg 3, PyJWT, Argon2, Alembic.
 - Storage: PostgreSQL 16 locally or hosted PostgreSQL such as Neon (15+ required by migration 0002).
 - Vercel deployment uses two projects from the same repository: one rooted at `api/`, one rooted at `web/`.
@@ -67,21 +67,30 @@ OmniLearn/
 - Lessons and reading passages are rendered as real Markdown by `web/app/markdown.tsx` (react-markdown + remark-gfm): headings, bold/italic, lists, GitHub tables, task lists, code, quotes, links. Raw HTML in lesson text is deliberately shown as plain text and unsafe link URLs are dropped; never add `rehype-raw` or `dangerouslySetInnerHTML`, because lesson content is imported data.
 - Roadmap and lesson viewer with mastery progress. Prerequisite IDs remain available as curriculum metadata, but roadmap nodes are all accessible.
 - Roadmap mind map (`web/app/roadmap-map.tsx`, default view; a List toggle keeps the old list): main steps (`parent_node_id` null) on a vertical spine, sub-topics branching left/right, deeper levels as chips. Edit mode renames, adds, deletes, reorders and re-parents nodes through `PUT /subjects/{sid}/roadmap/layout`. Deleting a node moves its children up one level.
-- Vocabulary recognition, recall, and typed production modes, with review ratings and scheduling.
-- Reading passages and comprehension questions.
-- Test bank, practice questions, timed or untimed exam sessions, and mistake notebook.
-- Questions can be removed one at a time (lesson test page and Test center), for a whole lesson ("Remove all N"), or in bulk from the Test center ("Remove all" / "Remove shown" when a search filter is active). Each asks for confirmation and calls `DELETE /subjects/{sid}/tests/{test_id}`, which also deletes that question's attempts and mistakes.
-- Manual creation for subjects, roadmap milestones, and vocabulary cards; test questions are added through JSON import.
-- JSON import/export, client-side Zod validation, and API-side Pydantic validation.
-- Copyable AI prompts for creating roadmap, vocabulary, reading, and test JSON, available only inside the import window via a "Prompt for" picker that defaults to the current page. Roadmap prompts ask for main steps plus sub-topics (`parent_node_id`). Lesson-test prompts include the selected lesson Markdown; vocabulary prompts end with an editable request area for a topic, source, or required word list.
-- First-subject onboarding that asks the user to upload an initial JSON bundle.
-- Empty-workspace onboarding includes an upload action; the import window contains the context-aware prompt-copy action.
+- Vocabulary practice (`web/app/vocab-practice.tsx`) is a full-screen view (rendered through a portal over the whole app, so only the card and its answers show and nothing needs scrolling). Words are always shuffled. Modes: Flashcards (flip, then rate Again/Hard/Good/Easy), Choose the word, Choose the meaning, Type the word (accent-only mistakes count as "Almost"); several enabled modes are mixed per card. Missed words return later in the session, and a summary lists them. Each answer posts a review (rating 0-3) so spaced-repetition scheduling still updates; the workspace refreshes once at the end, not per answer. The gear menu holds sound on/off, voice, the enabled modes, and "only words due for review" (off by default = every word in the topic). Settings are saved in localStorage under `learnify.vocab.settings` (voice is stored per subject).
+- Pronunciation: each card with its word visible has a speaker button. It plays the card's `audio_url` if present, otherwise the browser's built-in speech synthesis (no server, no API key). The voice language is guessed from the words (scripts plus accent patterns; best effort) and can be overridden in the gear menu. Sound auto-plays the word when it is the prompt, or after answering when the meaning is the prompt. iOS only speaks after a tap inside the page, so the screen sends one silent utterance on the first tap to unlock it.
+- Saved-data-first cache (`web/lib/cache.ts`): the signed-in account, the subject list and each subject's workspace response are kept in localStorage (`learnify.cache.*`, keyed by account id). On load the app paints from them at once and replaces them with fresh API data; they are rewritten after every successful workspace load and wiped on sign-out or a 401. Best effort only (quota or blocked storage just means a normal load). It stores the user's study content in the browser, so keep it out of anything shared.
+- Add to vocabulary from text (`web/app/selection-menu.tsx`): select a word or phrase (up to 120 characters) in a lesson or reading text (elements marked `data-selectable`). Desktop: right-click shows "Add “word” to vocabulary". Touch: a floating button appears under the selection. The vocabulary form opens with the term and the surrounding sentence as the example, and `web/app/translate-bar.tsx` auto-fills the definition. There is no separate "save selected word" button.
+- Translation (`web/lib/translate.ts`): free MyMemory API called straight from the browser (no key, per-visitor daily allowance, only the selected word is sent). From/To languages are chosen in the form (From defaults to auto-detect) and remembered in localStorage `learnify.translate`. Failures and echoes show a message and the user types the meaning. To change provider, replace `translate()`; a server proxy would pool every user into one daily quota.
+- Reading room (`web/app/readings.tsx`): texts are tiles showing only the title, level and a "Finished" mark, each with a delete button (`DELETE /subjects/{sid}/readings/{id}`). A text opens on `/readings/{id}`; answers give instant feedback, and answering every question (or "Mark as finished") marks it finished. Finished marks live in this browser (localStorage `learnify.readings.done.<subject>`), not in the database.
+- Lesson test page: choosing an answer checks it at once (green/red plus explanation, saved as an attempt); "Try again" re-answers.
+- Exams (`web/app/exam-runner.tsx`, started from the Test center or "Retest all" in the mistake notebook) are full screen, one question at a time: Prev/Next, flag for review, cross out choices, a question navigator drawer (search, All/Unanswered/Flagged, numbered grid), optional timer, a finish confirmation, then a results screen with explanations. Answers are posted only at Finish, so they feed the mistake notebook.
+- Mistake notebook (`web/app/mistakes.tsx`): questions whose latest attempt is a flagged mistake; answer on the card (instant feedback, counts as a retest); two correct answers in a row clear a question. Cleared cards stay until you leave the page.
+- Test center (`web/app/test-center.tsx`): questions are grouped by lesson (categories, under their main step; questions with no lesson sit in "General questions"). Tick any lessons to build a custom test (how many, shuffle, timed at 1 minute per question), or press Practice on one lesson. It only receives `tests` rows; reading-passage questions are a separate table (`reading_questions`) and never appear in the Test center or its custom tests.
+- Questions can be removed one at a time (lesson test page and Test center) or per lesson ("Remove all N" on the lesson test page, or on a lesson category in the Test center). Each asks for confirmation and calls `DELETE /subjects/{sid}/tests/{test_id}`, which also deletes that question's attempts and mistakes.
+- Manual creation for subjects, lessons (map editor or Add milestone), vocabulary cards and single questions. The server assigns every ID; forms never ask for one.
+- JSON import/export in one ID-free bundle format (see Content bundle format). The browser only parses JSON; all validation happens in the API (`api/app/bundle.py`) and the database (migration 0003 constraints).
+- Copyable AI prompts for creating roadmap, vocabulary, reading, and test JSON, available only inside the import window via a "Prompt for" picker that defaults to the current page. Roadmap prompts ask for main steps plus sub-topics (`parent_node_id`). Lesson-test prompts include the selected lesson Markdown; vocabulary and reading prompts end with an editable request area (topic, source text or required words); the reading prompt names the current subject and lists existing reading titles to avoid repeats.
+- First-subject onboarding: the import window defaults to "Add to: A new subject" and the generic "New subject (full bundle)" prompt, which works for any topic (it does not use the currently selected subject's name).
+- The import window has an **Add to** choice: a new subject, this subject, or (on lesson pages) this lesson. Importing into a lesson links top-level questions to it and adds top-level lessons as its sub-topics.
+- Settings has **Delete this subject** (type the exact title to confirm; offers Export a copy first). `DELETE /subjects/{sid}` cascades to all content and progress.
 - Main views have separate URLs, including `/roadmap`, `/vocabulary`, `/readings`, `/tests`, `/mistakes`, `/settings`, `/lesson/{node_id}`, and `/lesson/{node_id}/test`; vocabulary practice routes include the selected topic.
 - Subject data initially loads through one account-protected `/subjects/{subject_id}/workspace` request, including batched roadmap progress, instead of one progress request per lesson. Reading passages and questions are loaded with one joined query rather than one query per passage.
 - Vocabulary topic tiles derived from card tags, each opening its own practice screen.
 - Lesson tests appear at the end of a lesson and open on a separate test screen. Questions are inserted from JSON instead of manually added in the lesson.
 - Account settings for password changes and a password-confirmed account reset. Reset requires typing `DELETE` and deletes the account plus owned learning data.
 - Branding: the logo mark is `web/public/logo-mark.png` (transparent PNG cut from the supplied logo); `web/app/icon.png` and `web/app/apple-icon.png` are the favicon and iOS icon (Next picks them up automatically). The wordmark is live text so it follows the theme.
+- iPhone layout: `layout.tsx` exports `viewport` with `viewportFit: "cover"` so the fixed bottom tab bar reaches the screen edge; the phone header, tab bar and content pad with `env(safe-area-inset-*)`, and `.main-nav::after` keeps a solid strip under the bar. Keep new fixed-bottom UI above `var(--tabbar-h)`.
 - Design system in `web/app/globals.css`: navy ink + sunflower accent, Plus Jakarta Sans (Source Serif 4 for reading passages), every colour a CSS token; dark mode (`data-theme="dark"`) only redefines tokens, so never hard-code colours. Icons come from `lucide-react` (pinned). Layouts: sidebar at 1024px and up, an icon rail with short labels at 768-1023px (iPad portrait), and below 768px a compact header plus a fixed bottom tab bar, with dialogs as bottom sheets. Touch devices get 44px+ tap targets.
 
 The original specification also describes richer roadmap graph visualization, audio/text-to-speech, richer reading text-selection capture, and more advanced exam/prerequisite behavior. Check the current UI before assuming those features are implemented.
@@ -95,13 +104,13 @@ The original specification also describes richer roadmap graph visualization, au
 5. `POST /auth/logout` clears the cookie.
 6. `GET /auth/me` restores the session on page load. A 401 elsewhere fires `omnilearn:unauthorized` and returns to the sign-in screen.
 7. `get_current_user` reads the cookie (or, for API tools such as `/docs`, an `Authorization: Bearer` header), validates signature/expiry, and resolves the user. Protected routes require this dependency.
-8. Subjects have `owner_user_id`; API subject operations check ownership. Per-user progress/attempt records use the authenticated user's ID.
+8. Subjects have a required `owner_user_id` (FK to users, cascade); API subject operations check ownership. Progress/attempt rows reference `users(id)` and cascade on account deletion.
 9. `POST /auth/change-password` accepts the current password and a new password of at least 12 characters.
 10. `DELETE /auth/account` requires the current password and the exact confirmation text `DELETE`; PostgreSQL cascades deletion through owned subjects and their learning content.
 
 `JWT_SECRET` must be a long, unique secret in production (the API refuses to start when `COOKIE_SECURE` is on and the secret is the public default or shorter than 32 characters; generate one with `python -c "import secrets;print(secrets.token_urlsafe(48))"`) and must be configured on the API project only. Changing it invalidates existing sessions. The token is not readable by JavaScript, but XSS could still act as the user, so avoid unsafe HTML rendering.
 
-The API no longer changes the schema at startup and no longer gives unowned subjects to the first account that registers; such legacy rows stay invisible. Subject IDs are global, and the API (not the browser) prefixes new ones with `u<first 8 hex of user id>_`, returning the stored ID from `POST /subjects` and from import as `subject_id`. Content IDs are scoped to their subject (see Database model).
+The API never changes the schema at startup. All IDs (subjects included) are server-generated UUIDs; requests never supply IDs for new items, and extra `id` fields are ignored.
 
 ## API route map
 
@@ -110,15 +119,15 @@ Except for `/health`, `/auth/register`, `/auth/login`, and `/auth/logout`, route
 | Area | Routes |
 | --- | --- |
 | Health and accounts | `GET /health`, `POST /auth/register`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, `POST /auth/change-password`, `DELETE /auth/account` |
-| Subjects | `GET /subjects`, `POST /subjects`, `GET /subjects/{sid}`, `GET /subjects/{sid}/dashboard`, `GET /subjects/{sid}/roadmap`, `GET /subjects/{sid}/progress` |
-| Roadmap | `POST /subjects/{sid}/nodes`, `PUT /subjects/{sid}/roadmap/layout` (batch move/reorder, rejects cycles), `PUT` / `DELETE /subjects/{sid}/nodes/{node_id}`, `DELETE /subjects/{sid}/nodes/{node_id}/tests/{test_id}`, `GET` / `POST /subjects/{sid}/nodes/{node_id}/progress` |
-| Tests | `GET` / `POST /subjects/{sid}/tests`, `PUT` / `DELETE /subjects/{sid}/tests/{test_id}`, `POST /subjects/{sid}/tests/{test_id}/attempts`, `GET /subjects/{sid}/mistakes` |
-| Vocabulary | `GET` / `POST /subjects/{sid}/vocab`, `PUT` / `DELETE /subjects/{sid}/vocab/{card_id}`, `POST /subjects/{sid}/vocab/{card_id}/review` |
-| Readings | `GET` / `POST /subjects/{sid}/readings`, `PUT` / `DELETE /subjects/{sid}/readings/{reading_id}` |
-| Bundles | `POST /subjects/{sid}/import`, `GET /subjects/{sid}/export` |
+| Subjects | `GET /subjects`, `POST /subjects`, `GET` / `DELETE /subjects/{sid}` (delete needs `{"confirmation": "<exact title>"}`), `GET /subjects/{sid}/dashboard`, `GET /subjects/{sid}/roadmap`, `GET /subjects/{sid}/progress` |
+| Roadmap | `POST /subjects/{sid}/nodes`, `PUT /subjects/{sid}/roadmap/layout` (batch move/reorder, rejects cycles), `PUT` / `DELETE /subjects/{sid}/nodes/{node_id}`, `DELETE /subjects/{sid}/nodes/{node_id}/tests/{test_id}` (unlink), `GET` / `POST /subjects/{sid}/nodes/{node_id}/progress` |
+| Tests | `GET` / `POST /subjects/{sid}/tests`, `DELETE /subjects/{sid}/tests/{test_id}`, `POST /subjects/{sid}/tests/{test_id}/attempts`, `GET /subjects/{sid}/mistakes` |
+| Vocabulary | `GET` / `POST /subjects/{sid}/vocab`, `DELETE /subjects/{sid}/vocab/{card_id}`, `POST /subjects/{sid}/vocab/{card_id}/review` |
+| Readings | `GET /subjects/{sid}/readings`, `DELETE /subjects/{sid}/readings/{reading_id}` (readings are added by import) |
+| Bundles | `POST /subjects/import` (new subject from a full course), `POST /subjects/{sid}/import[?lesson_id=]` (add to a subject or lesson), `GET /subjects/{sid}/export` |
 | Workspace | `GET /subjects/{sid}/workspace`, a combined subject data response for initial page loading |
 
-Request bodies may omit `subject_id`; the path decides it.
+All `{sid}` and item path parameters are UUIDs (malformed ones get 422). Import errors return 422 with `{"detail": {"message", "errors": ["lessons[2].questions[0].answer: ..."]}}`; `web/lib/api.ts` turns that into a bulleted message.
 
 Interactive API docs are available at `/docs` in local development. If `/auth/register` returns 404 but the source contains that route, rebuild/recreate the API container: the Docker image copies API source at build time and does not mount it live.
 
@@ -137,7 +146,7 @@ The schema is defined by Alembic migrations in `api/migrations/versions` and mir
 - `reading_passages`: passage content and level.
 - `reading_questions`: ordered multiple-choice comprehension questions.
 
-Keys: `roadmap_nodes`, `tests`, `vocab_cards`, and `reading_passages` have primary key `(subject_id, id)`; `reading_questions` has `(subject_id, reading_id, id)`. Progress and attempt tables carry `subject_id` and use composite foreign keys. An item ID only needs to be unique within its subject. Older rows keep their browser-prefixed IDs (`u1a2b3c4d_...`).
+Keys and checks (migration 0003): every table has a single UUID primary key (`gen_random_uuid()` / Python `uuid4`). `roadmap_nodes.parent_node_id` and `tests.node_id` use composite FKs on `(subject_id, id)`, so links cannot cross subjects. Progress tables are keyed `(user_id, node_id)` / `(user_id, card_id)`. CHECKs: non-empty titles, prompts and terms; 2-20 options with `correct_index` inside them; a lesson cannot be its own parent; progress statuses are enumerated. `test_ids` in API responses is derived from `tests.node_id` (no stored array); `prerequisites` was removed. Lessons are returned depth-first (main step, then its sub-topics) with `order_index` per parent.
 
 Important integrity behavior: child content references its subject; deleting a subject cascades to its content. Deleting a node sets `tests.node_id` and child `parent_node_id` to NULL (`ON DELETE SET NULL (column)`). Roadmap nodes and tests can link, while tests remain in the independent test bank. Reading questions cascade with their passage. Vocabulary progress is unique per user/subject/card; roadmap progress is unique per user/subject/node.
 
@@ -195,21 +204,36 @@ No Neon API key is used by this app; the FastAPI server connects through `DATABA
 
 ## Content bundle format
 
-The canonical import bundle is an object with `subject_id`, optional `subject_title`, `target_level`, `description`, and arrays `nodes`, `tests`, `cards`, and `readings`. Arrays may be omitted and default to empty, but at least one content item is required. Each item has a stable `id` (max 64 characters) that only needs to be unique within its subject; item `subject_id` fields are ignored and set to the resolved subject. The browser accepts common aliases such as `roadmap_nodes`, `lessons`, `vocab_cards`, and fenced JSON, then maps them into the canonical schema. Node `test_ids` and test `node_id` connect the roadmap to the independent test bank. Reading question IDs only need to be unique within their reading. Subject creation and its initial content import happen in one API request; the response's `subject_id` is the stored (namespaced) ID. See `sample_bundle.json` and `web/lib/validate.ts` for the concrete schema.
+The canonical bundle has **no IDs**; structure comes from nesting and order (`api/app/bundle.py`, example in `sample_bundle.json`):
 
-Typical workflow: create or select a subject, use **Import materials**, paste or choose JSON, validate, then import. Export produces one JSON snapshot. Copy AI prompts from the relevant learning area and ask an external model to return JSON matching the example; validate the generated content before importing.
+```json
+{"title": "Course", "description": "...", "level": "Beginner",
+ "lessons": [{"title": "Main step", "content": "Markdown", "level": "A1",
+              "questions": [{"question": "...", "options": ["a", "b"], "answer": 1, "explanation": "..."}],
+              "lessons": [{"title": "Sub-topic", "content": "...", "questions": [], "lessons": []}]}],
+ "questions": [], "vocabulary": [{"term": "...", "definition": "...", "part_of_speech": "...", "example": "...", "tags": ["topic"]}],
+ "readings": [{"title": "...", "content": "Markdown", "level": "B1", "questions": []}]}
+```
+
+`answer` may be the zero-based index, the exact option text, or a letter (A, B, ...). The parser accepts common aliases (nodes, cards, vocab, children, content_markdown, correct_index, a wrapping `{"course": {...}}`, ...) and the older flat format with `id`/`parent_node_id`/`node_id`/`test_ids`; those IDs are used only to rebuild links and are then discarded. Every import is one transaction: any error saves nothing. Limits per import: 2000 lessons, 5000 questions, 10000 cards, 500 readings, nesting up to 6 levels. Export returns the same format, so exporting and re-importing recreates a course for anyone.
+
+AI prompts (built in `copyPrompt`, home.tsx) tell the AI to answer with the finished JSON in one ```json code block (or an attached `learnify.json`), valid JSON only, no ids, no triple backticks inside content, and to return fewer lessons rather than cut the JSON off. The importer (`web/lib/extractJson.ts`) accepts whatever is pasted: bare JSON, a code block, or the AI's whole reply with chat text around it, an unclosed fence, a BOM, or trailing commas, and explains cut-off or invalid JSON in plain words. Keep the prompt wording and the extractor in step.
+
+Typical workflow: open **Import**, pick **Add to** and a prompt type, copy the AI prompt, paste the AI's JSON (or choose a file), then **Validate & import**. Errors list exact locations and keep the window open.
 
 ## Working conventions and troubleshooting
 
+- Branches: `main` auto-deploys to Vercel production (API + web) against the production Neon branch. Work on `dev`. Migrations on `dev` must not run against production Neon until `dev` is merged: use a Neon dev branch or the local Compose DB for local Docker, and run `alembic upgrade head` on production right before merging. Migration 0003 is one-way (downgrade raises); take a Neon branch backup first.
+
 - Keep database passwords and JWT signing keys out of tracked files and browser code. Do not copy values from `.env` into documentation or logs.
 - Add authentication dependencies and ownership checks to any new account data routes. Test cross-account access behavior when changing API ownership logic, if asked to run verification.
-- When changing Pydantic schemas, keep `web/lib/validate.ts`, API schemas, and import/export mappings aligned.
-- Learning-record keys are composite `(subject_id, id)`. Always look items up with both parts (`db.get(Model, (subject_id, item_id))`) and nest new content routes under `/subjects/{sid}`.
+- Bundle parsing lives only in `api/app/bundle.py` (there is no client-side schema). When changing the bundle format, update the parser, `export_bundle` in `main.py`, the AI prompt examples in `copyPrompt` (home.tsx), and `sample_bundle.json` together.
+- IDs are server-generated UUIDs. Look items up with `db.get(Model, id)` and check `obj.subject_id == sid` (`require_item`), and nest new content routes under `/subjects/{sid}`. Never accept client-supplied IDs for new rows.
 - A 404 on `/auth/register` usually indicates a stale API image or a web app pointed at a different API. Check the web build's `API_ORIGIN`, rebuild the API container, and inspect `/openapi.json` or `/docs`.
 - After importing, the importer checks that saved item counts match submitted counts, closes the import window at once, and reloads the workspace in the background without the full-screen loading state. Import and validation errors stay visible in that window. Other actions also refresh quietly.
 - The workspace endpoint runs about 7 queries and derives its dashboard numbers from the loaded lists. The SQLAlchemy pool allows 5+5 connections because the browser sends requests in parallel.
 - `docker compose up` without `--build` reuses old images. After pulling or editing code, always run `docker compose up --build`.
-- The initial AI prompt explicitly asks for at least three populated lesson nodes. The import confirmation reports counts of saved lessons, questions, vocabulary cards, and readings.
+- The initial AI prompt is subject-agnostic and asks for 4-8 main steps with nested sub-topics, questions per lesson, and optional vocabulary and readings.
 - There is no automated test suite yet.
 - Next's Docker build uses standalone output. A native Windows `npm run build` previously completed compilation, type-checking, and page generation, then failed while copying `.next/standalone` traced files with `EPERM`. This was a Windows filesystem limitation observed in that environment; if it recurs in Docker, inspect the Docker build output and permissions separately.
 - Do not remove the Compose volume as a routine troubleshooting step; it contains the local database.

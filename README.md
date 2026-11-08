@@ -16,6 +16,8 @@ Open [http://localhost:3000](http://localhost:3000). The browser only talks to t
 
 On every start the API container runs `alembic upgrade head` before serving, so the database schema is always current. Each migration runs in one transaction: it either applies fully or not at all.
 
+**Branches:** `main` deploys to Vercel production; new work happens on `dev`. When `dev` contains a migration that production has not run yet, point your local `.env` at a **Neon development branch** (or remove `DATABASE_URL` to use the local Compose database) before `docker compose up --build`, otherwise the local API migrates the production database.
+
 For local development against Neon, copy `.env.example` to `.env` and set `DATABASE_URL` to your Neon connection URI. Compose still starts its local PostgreSQL container, but the API (and its migrations) use Neon. **Take a Neon backup or branch before starting a build that contains new migrations.**
 
 ## Database migrations
@@ -52,10 +54,10 @@ Lessons, questions, vocabulary cards and readings are identified by their subjec
 
 ## First use
 
-Create a subject, choose **Import materials**, and load `sample_bundle.json` or paste generated JSON. Zod validates the bundle in the browser and Pydantic validates it again in the API.
+Choose **Import**, keep **Add to: A new subject**, and load `sample_bundle.json` or paste JSON from the AI prompt. Study material needs no IDs: lessons, sub-topics, questions, vocabulary and readings are linked by how they are nested. The API validates everything (with exact error locations) and the database enforces the structure with constraints.
 
 ## Architecture
 
-- `web/` — Next.js 16, React 19, TypeScript, Zod. All API calls go through `web/lib/api.ts` to the `/api` proxy defined in `web/next.config.ts`.
+- `web/` — Next.js 16, React 19, TypeScript, lucide-react, react-markdown. All API calls go through `web/lib/api.ts` to the `/api` proxy defined in `web/next.config.ts`.
 - `api/` — FastAPI, SQLAlchemy 2, Psycopg 3, Argon2, PyJWT, Alembic.
 - `docker-compose.yml` — local PostgreSQL, API, and web services. The local database lives in the `omnilearn-db` volume; `docker compose down -v` erases it.
