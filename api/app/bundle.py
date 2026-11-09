@@ -32,7 +32,7 @@ from typing import Any
 
 MAX_ERRORS = 25
 MAX_DEPTH = 6
-LIMITS = {"lessons": 2000, "questions": 5000, "vocabulary": 10000, "readings": 500}
+LIMITS = {"lessons": 5000, "questions": 20000, "vocabulary": 30000, "readings": 1000}
 TITLE_MAX, LEVEL_MAX, TERM_MAX, POS_MAX, URL_MAX = 255, 32, 255, 64, 1024
 TEXT_MAX = 200_000
 OPTIONS_MIN, OPTIONS_MAX = 2, 20
