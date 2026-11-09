@@ -12,8 +12,8 @@ from .config import DEFAULT_JWT_SECRET, settings
 from .database import get_db
 from . import models as m
 from .auth import clear_session_cookie, get_current_user, hash_password, set_session_cookie, verify_password
-from .bundle import Bundle, BundleError, Lesson, Question, parse_bundle
-from .schemas import (AccountDeleteIn, AttemptIn, CardCreate, LoginIn, NodeCreate, NodeUpdate, PasswordChangeIn, RegisterIn,
+from .bundle import Bundle, BundleError, Lesson, Question, parse_bundle, parse_question
+from .schemas import (AccountDeleteIn, AttemptIn, CardCreate, LoginIn, NodeCreate, NodeUpdate, PasswordChangeIn, ReadingUpdate, RegisterIn,
                       ReviewIn, RoadmapLayoutIn, SubjectDeleteIn, SubjectIn, TestCreate)
 
 if settings.cookie_secure and (settings.jwt_secret == DEFAULT_JWT_SECRET or len(settings.jwt_secret) < 32):
@@ -155,6 +155,16 @@ def create_subject(payload: SubjectIn, db: Session = Depends(get_db), user: m.Us
 @app.get("/subjects/{subject_id}")
 def get_subject(subject_id: UUID, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
     return require_subject(db, subject_id, user)
+
+
+@app.put("/subjects/{subject_id}")
+def update_subject(subject_id: UUID, payload: SubjectIn, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+    obj = require_subject(db, subject_id, user)
+    obj.title, obj.description = payload.title, payload.description
+    if payload.target_level is not None:
+        obj.target_level = payload.target_level
+    commit_or_422(db); db.refresh(obj)
+    return obj
 
 
 @app.delete("/subjects/{subject_id}", status_code=204)
@@ -481,6 +491,15 @@ def create_vocab(subject_id: UUID, payload: CardCreate, db: Session = Depends(ge
     return obj
 
 
+@app.put("/subjects/{subject_id}/vocab/{card_id}")
+def update_vocab(subject_id: UUID, card_id: UUID, payload: CardCreate, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+    obj = require_item(db, m.VocabCard, subject_id, card_id, user, "Card")
+    for key, value in payload.model_dump().items():
+        setattr(obj, key, value)
+    commit_or_422(db); db.refresh(obj)
+    return obj
+
+
 @app.delete("/subjects/{subject_id}/vocab/{card_id}", status_code=204)
 def delete_vocab(subject_id: UUID, card_id: UUID, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
     obj = require_item(db, m.VocabCard, subject_id, card_id, user, "Card")
@@ -514,6 +533,26 @@ def review_vocab(subject_id: UUID, card_id: UUID, payload: ReviewIn, db: Session
 def list_readings(subject_id: UUID, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
     require_subject(db, subject_id, user)
     return reading_rows(db, subject_id)
+
+
+@app.put("/subjects/{subject_id}/readings/{reading_id}")
+def update_reading(subject_id: UUID, reading_id: UUID, payload: ReadingUpdate, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+    reading = require_item(db, m.ReadingPassage, subject_id, reading_id, user, "Reading")
+    questions = None
+    if payload.questions is not None:
+        questions = []
+        for i, raw in enumerate(payload.questions):
+            try:
+                questions.append(parse_question(raw))
+            except BundleError as e:
+                raise HTTPException(422, {"message": "Invalid reading question.", "errors": [f"questions[{i}]: {x}" for x in e.errors]})
+    reading.title, reading.cefr_level, reading.content = payload.title, payload.level, payload.content
+    if questions is not None:
+        db.execute(delete(m.ReadingQuestion).where(m.ReadingQuestion.reading_id == reading_id))
+        db.add_all(m.ReadingQuestion(id=uuid4(), reading_id=reading_id, order_index=j, prompt=q.prompt, options=q.options,
+                                     correct_index=q.correct_index, explanation=q.explanation) for j, q in enumerate(questions))
+    commit_or_422(db)
+    return next(r for r in reading_rows(db, subject_id) if r["id"] == reading_id)
 
 
 @app.delete("/subjects/{subject_id}/readings/{reading_id}", status_code=204)

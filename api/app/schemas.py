@@ -4,7 +4,7 @@ Bulk study material goes through app/bundle.py instead. No request accepts an
 ID for a new item: the server generates every ID. Extra fields (for example an
 "id" an older client still sends) are ignored.
 """
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 from pydantic import AfterValidator, BaseModel, Field, field_validator, model_validator
 
@@ -24,6 +24,14 @@ class SubjectIn(BaseModel):
     description: str | None = Field(default=None, max_length=5000)
     target_level: str | None = Field(default=None, max_length=32)
 
+
+
+class ReadingUpdate(BaseModel):
+    """Edits one reading text. `questions` (export format) replaces its questions when given."""
+    title: Title
+    content: str = Field(min_length=1, max_length=200_000)
+    level: str | None = Field(default=None, max_length=16)
+    questions: list[Any] | None = Field(default=None, max_length=200)
 
 
 class RegisterIn(BaseModel):
