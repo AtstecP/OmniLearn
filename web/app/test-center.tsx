@@ -14,7 +14,7 @@ type Q = { id: string; node_id?: string | null; prompt: string; options: string[
 type N = { id: string; title: string; parent_node_id?: string | null };
 type Cat<T extends Q> = { id: string; title: string; questions: T[] };
 type Group<T extends Q> = { id: string; title: string; cats: Cat<T>[] };
-export type TestOptions = { limit: number; shuffle: boolean; timed: boolean };
+export type TestOptions = { limit: number; shuffle: boolean; timed: boolean; minutes?: number };
 
 type Props<T extends Q> = {
   nodes: N[];
@@ -35,6 +35,7 @@ export default function TestCenter<T extends Q>({ nodes, questions, busy, onStar
   const [limit, setLimit] = useState(0);
   const [shuffle, setShuffle] = useState(true);
   const [timed, setTimed] = useState(false);
+  const [minutes, setMinutes] = useState(0); // 0 = automatic: 1 minute per question
 
   const groups = useMemo<Group<T>[]>(() => {
     const term = search.trim().toLowerCase();
@@ -77,7 +78,7 @@ export default function TestCenter<T extends Q>({ nodes, questions, busy, onStar
 
   const toggle = (set: Set<string>, id: string) => { const next = new Set(set); next.has(id) ? next.delete(id) : next.add(id); return next; };
   const setMany = (ids: string[], on: boolean) => setSelected(prev => { const next = new Set(prev); ids.forEach(id => (on ? next.add(id) : next.delete(id))); return next; });
-  const options: TestOptions = { limit, shuffle, timed };
+  const options: TestOptions = { limit, shuffle, timed, minutes };
 
   if (busy) return null;
   if (!questions.length) {
@@ -105,7 +106,13 @@ export default function TestCenter<T extends Q>({ nodes, questions, busy, onStar
             <datalist id="tc-limit-presets">{[5, 10, 20, 30, 50].map(n => <option key={n} value={n} />)}</datalist>
           </label>
           <label className="tc-check"><input type="checkbox" checked={shuffle} onChange={e => setShuffle(e.target.checked)} /> Shuffle</label>
-          <label className="tc-check"><input type="checkbox" checked={timed} onChange={e => setTimed(e.target.checked)} /> Timed (1 min per question)</label>
+          <label className="tc-check"><input type="checkbox" checked={timed} onChange={e => setTimed(e.target.checked)} /> Timed</label>
+          {timed && (
+            <label className="tc-field">Minutes
+              <input className="input" type="number" inputMode="numeric" min={1} max={600} step={1} placeholder={`${Math.max(5, willAsk)} (1 min per question)`}
+                value={minutes || ""} onChange={e => setMinutes(Math.min(600, Math.max(0, Math.floor(Number(e.target.value)) || 0)))} />
+            </label>
+          )}
         </div>
         <div className="filter-row">
           <input className="input" placeholder="Search questions or tags…" value={search} onChange={e => setSearch(e.target.value)} aria-label="Search questions" />
@@ -177,7 +184,7 @@ export default function TestCenter<T extends Q>({ nodes, questions, busy, onStar
       <div className="tc-bar" role="region" aria-label="Start a custom test">
         <div className="tc-bar-text">
           <strong>{chosen.length ? `${plural(chosen.length, "lesson")} · ${plural(willAsk, "question")}` : "No lessons ticked"}</strong>
-          <small>{chosen.length ? (limit > 0 && chosenCount > limit ? `a random ${limit} of ${chosenCount}` : timed ? `${Math.max(5, willAsk)} minutes` : "untimed") : `${plural(total, "question")} available`}</small>
+          <small>{chosen.length ? (limit > 0 && chosenCount > limit ? `a random ${limit} of ${chosenCount}` : timed ? `${minutes > 0 ? minutes : Math.max(5, willAsk)} minutes` : "untimed") : `${plural(total, "question")} available`}</small>
         </div>
         <button type="button" className="btn primary" disabled={!chosen.length}
           onClick={() => onStart(chosen.flatMap(c => c.questions), options)}>
