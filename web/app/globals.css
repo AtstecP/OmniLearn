@@ -767,3 +767,6 @@ input[type=checkbox]{width:18px;height:18px;flex:none}
 .topic-wrap .topic-tile{flex:1;min-width:0}
 .topic-edit{position:absolute;top:8px;right:8px;display:inline-grid;place-items:center;width:36px;height:36px;border:0;border-radius:10px;background:transparent;color:var(--muted);padding:0;cursor:pointer}
 .topic-edit:hover{background:var(--surface-2);color:var(--ink)}
+
+.path-search{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.path-search .input{min-height:42px;flex:1}
