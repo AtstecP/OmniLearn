@@ -14,7 +14,7 @@ from .gzip_body import GzipRequestMiddleware
 from . import models as m
 from .auth import clear_session_cookie, get_current_user, hash_password, set_session_cookie, verify_password
 from .bundle import Bundle, BundleError, Lesson, Question, parse_bundle, parse_question
-from .schemas import (AccountDeleteIn, AttemptIn, CardCreate, LoginIn, NodeCreate, NodeUpdate, PasswordChangeIn, ReadingUpdate, RegisterIn,
+from .schemas import (AccountDeleteIn, AttemptIn, CardCreate, LoginIn, NodeCreate, NodeUpdate, BulkIdsIn, PasswordChangeIn, ReadingUpdate, RegisterIn,
                       ReviewIn, RoadmapLayoutIn, SubjectDeleteIn, SubjectIn, TestCreate)
 
 if settings.cookie_secure and (settings.jwt_secret == DEFAULT_JWT_SECRET or len(settings.jwt_secret) < 32):
@@ -446,6 +446,15 @@ def create_test(subject_id: UUID, payload: TestCreate, db: Session = Depends(get
                          order_index=next_position(db, m.TestQuestion, m.TestQuestion.subject_id == subject_id, same_parent(m.TestQuestion.node_id, payload.node_id)))
     db.add(obj); commit_or_422(db); db.refresh(obj)
     return obj
+
+
+@app.post("/subjects/{subject_id}/tests/bulk-delete")
+def bulk_delete_tests(subject_id: UUID, payload: BulkIdsIn, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+    """Delete many questions at once (attempts and mistakes go with them). Ids from other subjects are ignored."""
+    require_subject(db, subject_id, user)
+    removed = db.execute(delete(m.TestQuestion).where(m.TestQuestion.subject_id == subject_id, m.TestQuestion.id.in_(payload.ids))).rowcount
+    db.commit()
+    return {"deleted": removed}
 
 
 @app.delete("/subjects/{subject_id}/tests/{test_id}", status_code=204)

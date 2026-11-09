@@ -67,7 +67,7 @@ export function ReadAloudBar({ subjectId, text }: { subjectId: string; text: str
     setLang(saved);
     return () => { stopSpeaking(); };
   }, [subjectId]);
-  useEffect(() => { setReader({ lang, guess }); }, [lang, guess]);
+  useEffect(() => { setReader({ lang, guess }); return () => setReader({ lang: "auto", guess: null }); }, [lang, guess]);
 
   function change(next: string) {
     setLang(next);

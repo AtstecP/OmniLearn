@@ -74,4 +74,9 @@ export function speak(text: string, lang: string | null, onEnd?: () => void) {
 const reader = { lang: "auto", guess: null as string | null };
 export function setReader(next: { lang?: string; guess?: string | null }) { Object.assign(reader, next); }
 export const readerLang = () => (reader.lang !== "auto" ? reader.lang : reader.guess);
-export function readSelected(text: string, onEnd?: () => void) { speak(text, readerLang(), onEnd); }
+// Works on any page: the reading room's language choice wins, otherwise guess from the selection,
+// then from the text on the page (a single word is too short to guess from).
+export function readSelected(text: string, onEnd?: () => void) {
+  const page = typeof document !== "undefined" ? document.querySelector("[data-selectable]")?.textContent?.slice(0, 3000) || "" : "";
+  speak(text, readerLang() ?? guessLang(text) ?? guessLang(page), onEnd);
+}

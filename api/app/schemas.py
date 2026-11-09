@@ -150,5 +150,9 @@ class NodePlacement(BaseModel):
     order_index: int = Field(ge=0)
 
 
+class BulkIdsIn(BaseModel):
+    ids: list[UUID] = Field(max_length=5000)
+
+
 class RoadmapLayoutIn(BaseModel):
     nodes: list[NodePlacement] = Field(min_length=1, max_length=2000)

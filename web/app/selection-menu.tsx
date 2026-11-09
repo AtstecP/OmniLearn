@@ -10,39 +10,46 @@ import { BookmarkPlus, Volume2 } from "lucide-react";
  * The sentence around the selection is passed along as the example.
  */
 
-type Menu = { x: number; y: number; term: string; sentence: string; touch: boolean };
+type Menu = { x: number; y: number; term: string; text: string; sentence: string; canAdd: boolean; touch: boolean };
+const MAX_READ = 5000;
 const MAX = 120;
 const BLOCKS = "p,li,td,th,blockquote,h1,h2,h3,h4,h5,h6,dd,dt";
 
 const clean = (t: string) => t.replace(/\s+/g, " ").replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "").trim();
 const elOf = (n: Node | null) => (n && n.nodeType === 1 ? (n as Element) : n?.parentElement) || null;
 
-function read(): { term: string; sentence: string; rect: DOMRect } | null {
+function read(): { term: string; text: string; sentence: string; canAdd: boolean; rect: DOMRect } | null {
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+  const active = document.activeElement;
+  if (active && /^(INPUT|TEXTAREA)$/.test(active.tagName)) return null;
+  const text = sel.toString().replace(/\s+/g, " ").trim();
+  if (!text || text.length > MAX_READ) return null;
+  // "Add to vocabulary" only inside lesson / reading text; "Read it" works on any selected text.
   const a = elOf(sel.anchorNode)?.closest("[data-selectable]");
   const b = elOf(sel.focusNode)?.closest("[data-selectable]");
-  if (!a || a !== b) return null;
-  const term = clean(sel.toString());
-  if (!term || term.length > MAX) return null;
+  const term = clean(text);
+  const canAdd = !!a && a === b && !!term && term.length <= MAX;
   const range = sel.getRangeAt(0);
-  const block = elOf(range.startContainer)?.closest(BLOCKS);
   let sentence = "";
-  const text = (block?.textContent || "").replace(/\s+/g, " ").trim();
-  if (text) {
-    const lower = text.toLowerCase();
-    const at = lower.indexOf(term.toLowerCase());
-    const parts = text.match(/[^.!?…]+[.!?…]*\s*/g) || [text];
-    let pos = 0;
-    for (const p of parts) {
-      if (at >= pos && at < pos + p.length) { sentence = p.trim(); break; }
-      pos += p.length;
+  if (canAdd) {
+    const block = elOf(range.startContainer)?.closest(BLOCKS);
+    const full = (block?.textContent || "").replace(/\s+/g, " ").trim();
+    if (full) {
+      const lower = full.toLowerCase();
+      const at = lower.indexOf(term.toLowerCase());
+      const parts = full.match(/[^.!?…]+[.!?…]*\s*/g) || [full];
+      let pos = 0;
+      for (const p of parts) {
+        if (at >= pos && at < pos + p.length) { sentence = p.trim(); break; }
+        pos += p.length;
+      }
+      if (!sentence) sentence = full.slice(0, 200);
+      if (sentence.length > 300) sentence = sentence.slice(0, 300).trim() + "…";
+      if (sentence.toLowerCase() === term.toLowerCase()) sentence = "";
     }
-    if (!sentence) sentence = text.slice(0, 200);
-    if (sentence.length > 300) sentence = sentence.slice(0, 300).trim() + "…";
-    if (sentence.toLowerCase() === term.toLowerCase()) sentence = "";
   }
-  return { term, sentence, rect: range.getBoundingClientRect() };
+  return { term, text, sentence, canAdd, rect: range.getBoundingClientRect() };
 }
 
 export default function SelectionMenu({ onAdd, onRead }: { onAdd: (term: string, sentence: string) => void; onRead?: (text: string) => void }) {
@@ -58,7 +65,7 @@ export default function SelectionMenu({ onAdd, onRead }: { onAdd: (term: string,
       const r = read();
       if (!r) return;
       e.preventDefault();
-      setMenu({ ...clamp(e.clientX, e.clientY), term: r.term, sentence: r.sentence, touch: false });
+      setMenu({ ...clamp(e.clientX, e.clientY), term: r.term, text: r.text, sentence: r.sentence, canAdd: r.canAdd, touch: false });
     }
     function onSelection() {
       if (!coarse()) return;
@@ -66,7 +73,7 @@ export default function SelectionMenu({ onAdd, onRead }: { onAdd: (term: string,
       timer.current = window.setTimeout(() => {
         const r = read();
         if (!r) { setMenu(m => (m?.touch ? null : m)); return; }
-        setMenu({ ...clamp(r.rect.left, r.rect.bottom + 10), term: r.term, sentence: r.sentence, touch: true });
+        setMenu({ ...clamp(r.rect.left, r.rect.bottom + 10), term: r.term, text: r.text, sentence: r.sentence, canAdd: r.canAdd, touch: true });
       }, 350);
     }
     function onDown(e: Event) {
@@ -96,13 +103,15 @@ export default function SelectionMenu({ onAdd, onRead }: { onAdd: (term: string,
   const shown = menu.term.length > 28 ? menu.term.slice(0, 27) + "…" : menu.term;
   return (
     <div ref={ref} className="sel-menu" role="menu" style={{ left: menu.x, top: menu.y }}>
-      <button type="button" role="menuitem" onMouseDown={e => e.preventDefault()}
-        onClick={() => { const m = menu; setMenu(null); window.getSelection()?.removeAllRanges(); onAdd(m.term, m.sentence); }}>
-        <BookmarkPlus size={16} />Add “{shown}” to vocabulary
-      </button>
+      {menu.canAdd && (
+        <button type="button" role="menuitem" onMouseDown={e => e.preventDefault()}
+          onClick={() => { const m = menu; setMenu(null); window.getSelection()?.removeAllRanges(); onAdd(m.term, m.sentence); }}>
+          <BookmarkPlus size={16} />Add “{shown}” to vocabulary
+        </button>
+      )}
       {onRead && (
         <button type="button" role="menuitem" onMouseDown={e => e.preventDefault()}
-          onClick={() => { const m = menu; setMenu(null); onRead(m.term); }}>
+          onClick={() => { const m = menu; setMenu(null); onRead(m.text); }}>
           <Volume2 size={16} />Read it
         </button>
       )}

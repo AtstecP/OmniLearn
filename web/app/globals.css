@@ -770,3 +770,13 @@ input[type=checkbox]{width:18px;height:18px;flex:none}
 
 .path-search{display:flex;align-items:center;gap:8px;margin-bottom:12px}
 .path-search .input{min-height:42px;flex:1}
+
+.q-bulk{margin-bottom:14px}
+.q-select-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:start}
+.q-select{display:flex;align-items:center;justify-content:center;min-width:32px;min-height:44px}
+.q-select input,.tc-pick{width:20px;height:20px;accent-color:var(--accent-strong)}
+.tc-pick{flex:none}
+.test-row:has(.tc-pick){grid-template-columns:auto minmax(0,1fr) auto}
+@media (max-width:767px){.test-row:has(.tc-pick){grid-template-columns:auto minmax(0,1fr)}}
+.tc-bulk{margin-top:8px}
+.node-sub{border-left:3px solid var(--line-strong)}

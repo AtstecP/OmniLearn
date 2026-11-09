@@ -35,6 +35,8 @@ export default function TestCenter<T extends Q>({ nodes, questions, busy, onStar
   const [limit, setLimit] = useState(0);
   const [shuffle, setShuffle] = useState(true);
   const [timed, setTimed] = useState(false);
+  const [manage, setManage] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const [minutes, setMinutes] = useState(0); // 0 = automatic: 1 minute per question
 
   const groups = useMemo<Group<T>[]>(() => {
@@ -119,6 +121,23 @@ export default function TestCenter<T extends Q>({ nodes, questions, busy, onStar
           <button className="btn small" type="button" onClick={() => setMany(cats.map(c => c.id), true)}>Select all</button>
           <button className="btn small" type="button" onClick={() => setSelected(new Set())} disabled={!selected.size}>Clear</button>
         </div>
+        <div className="filter-row tc-bulk">
+          <button className="btn small" type="button" onClick={() => { const on = !manage; setManage(on); setPicked(new Set()); if (on) setOpen(new Set(cats.map(c => c.id))); }}>
+            <Trash2 size={14} />{manage ? "Done" : "Delete several questions"}
+          </button>
+          {manage && (() => {
+            const all = cats.flatMap(c => c.questions.map(q => q.id));
+            const ids = all.filter(id => picked.has(id));
+            return (
+              <>
+                <button className="btn small" type="button" onClick={() => setPicked(ids.length === all.length ? new Set() : new Set(all))}>{ids.length === all.length ? "Clear selection" : `Select all ${all.length}`}</button>
+                <button className="btn small danger" type="button" disabled={!ids.length} onClick={() => { onRemove(ids, ids.length === 1 ? "the selected question" : `the ${ids.length} selected questions`); setPicked(new Set()); }}>
+                  <Trash2 size={14} />Delete selected ({ids.length})
+                </button>
+              </>
+            );
+          })()}
+        </div>
       </section>
 
       {!groups.length && <div className="empty-state"><strong>No matches</strong>Try a different search.</div>}
@@ -157,6 +176,7 @@ export default function TestCenter<T extends Q>({ nodes, questions, busy, onStar
                     <div className="tc-qlist">
                       {c.questions.map(q => (
                         <div className="test-row" key={q.id}>
+                          {manage && <input type="checkbox" className="tc-pick" checked={picked.has(q.id)} onChange={() => setPicked(prev => toggle(prev, q.id))} aria-label="Select this question to delete" />}
                           <div>
                             <div className="test-prompt">{q.prompt}</div>
                             {!!q.tags?.length && <div className="test-tags">{q.tags.map(x => <span className="tag" key={x}>{x}</span>)}</div>}
@@ -168,6 +188,7 @@ export default function TestCenter<T extends Q>({ nodes, questions, busy, onStar
                         </div>
                       ))}
                       <div className="tc-qfoot">
+                        {manage && <button type="button" className="btn small" onClick={() => setPicked(prev => { const next = new Set(prev); const all = c.questions.every(q => next.has(q.id)); c.questions.forEach(q => all ? next.delete(q.id) : next.add(q.id)); return next; })}>Select / clear this lesson</button>}
                         <button type="button" className="btn small danger" onClick={() => onRemove(c.questions.map(q => q.id), c.questions.length === 1 ? "the question in this lesson" : `all ${c.questions.length} questions in “${c.title}”`)}>
                           <Trash2 size={14} />Remove all {c.questions.length}
                         </button>
