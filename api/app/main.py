@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from .config import DEFAULT_JWT_SECRET, settings
 from .database import get_db
+from .gzip_body import GzipRequestMiddleware
 from . import models as m
 from .auth import clear_session_cookie, get_current_user, hash_password, set_session_cookie, verify_password
 from .bundle import Bundle, BundleError, Lesson, Question, parse_bundle, parse_question
@@ -21,6 +22,7 @@ if settings.cookie_secure and (settings.jwt_secret == DEFAULT_JWT_SECRET or len(
 
 # The schema is managed by Alembic (`alembic upgrade head`); the API never creates or alters tables.
 app = FastAPI(title="Learnify API", version="3.0.0", description="Schema-driven learning engine API")
+app.add_middleware(GzipRequestMiddleware)
 app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 

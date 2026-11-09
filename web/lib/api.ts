@@ -7,10 +7,19 @@ export async function api<T=any>(path: string, init?: RequestInit): Promise<T> {
   // The learner's own calendar day, so streaks follow local midnight rather than UTC.
   const d = new Date();
   headers.set("X-Local-Date", `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
-  const res = await fetch(`${base}${path}`, { ...init, headers, cache: "no-store", credentials: "same-origin" });
+  // Hosting platforms reject request bodies over ~4.5 MB (413), so big JSON bodies (imports, edits) go gzipped.
+  let body = init?.body;
+  if (typeof body === "string" && body.length > 200_000 && typeof CompressionStream !== "undefined") {
+    try {
+      body = await new Response(new Blob([body]).stream().pipeThrough(new CompressionStream("gzip"))).blob();
+      headers.set("Content-Encoding", "gzip");
+    } catch { body = init?.body; }
+  }
+  const res = await fetch(`${base}${path}`, { ...init, body, headers, cache: "no-store", credentials: "same-origin" });
   if (!res.ok) {
     let detail: any = `${res.status} ${res.statusText}`;
-    try { const b = await res.json(); detail = b.detail || detail; } catch {}
+    if (res.status === 413) detail = "This file is too big for the server, even compressed (limit about 4.5 MB). Split it into two or three smaller JSON files and import them one after another.";
+    try { const b = await res.json(); if (res.status !== 413) detail = b.detail || detail; } catch {}
     // Import errors: {message, errors: [...]}; FastAPI validation: [{loc, msg}, ...]
     if (detail && typeof detail === "object" && Array.isArray(detail.errors)) {
       detail = [detail.message, ...detail.errors.map((e: string) => "• " + e)].filter(Boolean).join("\n");
