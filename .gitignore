@@ -65,3 +65,8 @@ logs/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ----- Cloudflare (web/) ----------------------------------------
+**/.open-next/
+**/.wrangler/
+**/.dev.vars

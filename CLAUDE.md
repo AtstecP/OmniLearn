@@ -216,6 +216,10 @@ Create two Vercel projects from the repository:
 
 No Neon API key is used by this app; the FastAPI server connects through `DATABASE_URL`. Vercel deploys the web and API separately. Docker is for local development, not required as a production API host in this setup.
 
+## Optional: web on Cloudflare (when Vercel is blocked on a network)
+
+The web app can also run as a Cloudflare Worker (OpenNext adapter: `web/open-next.config.ts`, `web/wrangler.jsonc`, `public/_headers`, scripts `cf:preview` / `cf:deploy`). Only the web project moves; the FastAPI project stays on Vercel and Neon, and the Worker proxies `/api/*` to `API_ORIGIN` server-side, so browsers on a restricted network only talk to Cloudflare. Verified in a Linux container: the build succeeds and the Worker passes health, register (Set-Cookie), `/auth/me` with the cookie, and a gzipped import through to the API. Build on Linux (Cloudflare's own build, WSL or Docker); OpenNext is not supported on native Windows. Setup in the Cloudflare dashboard: Workers & Pages > Create > import the GitHub repo, root directory `web`, build command `npx opennextjs-cloudflare build`, deploy command `npx opennextjs-cloudflare deploy`, worker name `learnify-web` (must match `wrangler.jsonc`), build variable `API_ORIGIN` = the API project's origin. The API cannot move to Cloudflare Workers (Psycopg and Argon2 need native code). Vercel keeps deploying the same `web/` unchanged.
+
 ## Content bundle format
 
 The canonical bundle has **no IDs**; structure comes from nesting and order (`api/app/bundle.py`, example in `sample_bundle.json`):
