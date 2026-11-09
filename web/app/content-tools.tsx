@@ -22,13 +22,16 @@ const WARN: Record<Part, string> = {
   readings: "Saving replaces all reading texts with this JSON. Removed texts and their questions are deleted for good.",
 };
 
-function slice(part: Part, bundle: any) {
+function slice(part: Part, bundle: any, topic?: string) {
   if (part === "path") return { lessons: bundle.lessons || [], questions: bundle.questions || [] };
-  if (part === "vocabulary") return { vocabulary: bundle.vocabulary || [] };
+  if (part === "vocabulary") {
+    const all: any[] = bundle.vocabulary || [];
+    return { vocabulary: !topic || topic === "All words" ? all : all.filter(c => (c.tags || []).includes(topic) || (topic === "General" && !(c.tags || []).length)) };
+  }
   return { readings: bundle.readings || [] };
 }
 
-export function JsonEditor({ subjectId, part, onClose, onSaved }: { subjectId: string; part: Part; onClose: () => void; onSaved: (msg: string) => void }) {
+export function JsonEditor({ subjectId, part, topic, onClose, onSaved }: { subjectId: string; part: Part; topic?: string; onClose: () => void; onSaved: (msg: string) => void }) {
   const [text, setText] = useState("");
   const [original, setOriginal] = useState("");
   const [loading, setLoading] = useState(true);
@@ -39,11 +42,11 @@ export function JsonEditor({ subjectId, part, onClose, onSaved }: { subjectId: s
   useEffect(() => {
     let alive = true;
     api(`/subjects/${encodeURIComponent(subjectId)}/export`)
-      .then(b => { if (!alive) return; const t = JSON.stringify(slice(part, b), null, 2); setText(t); setOriginal(t); })
+      .then(b => { if (!alive) return; const t = JSON.stringify(slice(part, b, topic), null, 2); setText(t); setOriginal(t); })
       .catch(e => alive && setError(e.message))
       .finally(() => alive && setLoading(false));
     return () => { alive = false; };
-  }, [subjectId, part]);
+  }, [subjectId, part, topic]);
 
   async function copy() {
     try { await navigator.clipboard.writeText(text); }
@@ -55,10 +58,11 @@ export function JsonEditor({ subjectId, part, onClose, onSaved }: { subjectId: s
     setError("");
     const parsed = extractJson(text);
     if ("error" in parsed) { setError(parsed.error); return; }
-    if (!window.confirm(`${WARN[part]}\n\nSave changes?`)) return;
+    const warn = part === "vocabulary" && topic && topic !== "All words" ? `Saving replaces the words of the set "${topic}" with this JSON. Removed words are deleted for good, together with their review history. Other sets are not touched.` : WARN[part];
+    if (!window.confirm(`${warn}\n\nSave changes?`)) return;
     setSaving(true);
     try {
-      const r = await api<any>(`/subjects/${encodeURIComponent(subjectId)}/content/${part}`, json("PUT", parsed.value));
+      const r = await api<any>(`/subjects/${encodeURIComponent(subjectId)}/content/${part}${topic ? `?topic=${encodeURIComponent(topic)}` : ""}`, json("PUT", parsed.value));
       const c = r.saved || {};
       onSaved(part === "path" ? `Saved: ${c.lessons ?? 0} lessons, ${c.questions ?? 0} questions.` : part === "vocabulary" ? `Saved ${c.vocabulary ?? 0} words.` : `Saved ${c.readings ?? 0} texts.`);
     } catch (e: any) { setError(e.message); }
@@ -70,7 +74,7 @@ export function JsonEditor({ subjectId, part, onClose, onSaved }: { subjectId: s
     <div className="modal-backdrop" onClick={onClose}>
       <section className="modal json-modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
-          <div><h2>Edit {LABEL[part]} as JSON</h2><p>Change the text, add or delete entries, then save. No IDs needed.</p></div>
+          <div><h2>Edit {LABEL[part]}{topic && topic !== "All words" ? `: ${topic}` : ""} as JSON</h2><p>Change the text, add or delete entries, then save. No IDs needed.</p></div>
           <button className="close-button" onClick={onClose}>×</button>
         </div>
         <textarea id="json-editor-area" className="textarea json-area" spellCheck={false} value={loading ? "Loading…" : text} disabled={loading}

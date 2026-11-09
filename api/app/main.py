@@ -692,10 +692,12 @@ def import_into_subject(subject_id: UUID, payload: Any = Body(...), lesson_id: U
 
 
 @app.put("/subjects/{subject_id}/content/{part}")
-def replace_content(subject_id: UUID, part: str, payload: Any = Body(...), db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+def replace_content(subject_id: UUID, part: str, payload: Any = Body(...), topic: str | None = Query(None, max_length=255), db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
     """Replace one part of a subject with edited JSON, in one transaction. part: path (lessons + all
     questions), vocabulary or readings. The old rows go first; their questions, attempts, mistakes,
-    progress and reading questions are deleted with them, so nothing stale is left behind."""
+    progress and reading questions are deleted with them, so nothing stale is left behind.
+    For vocabulary, `topic` limits the replacement to one set of words: cards tagged with it, or the
+    untagged ones for "General". Other cards are not touched."""
     if part not in ("path", "vocabulary", "readings"):
         raise HTTPException(404, "Unknown part")
     subject = require_subject(db, subject_id, user)
@@ -713,7 +715,10 @@ def replace_content(subject_id: UUID, part: str, payload: Any = Body(...), db: S
         db.execute(delete(m.RoadmapNode).where(m.RoadmapNode.subject_id == subject_id))
     elif part == "vocabulary":
         keep.vocabulary = bundle.vocabulary
-        db.execute(delete(m.VocabCard).where(m.VocabCard.subject_id == subject_id))
+        cond = [m.VocabCard.subject_id == subject_id]
+        if topic and topic != "All words":
+            cond.append(func.cardinality(m.VocabCard.tags) == 0 if topic == "General" else m.VocabCard.tags.any(topic))
+        db.execute(delete(m.VocabCard).where(*cond))
     else:
         keep.readings = bundle.readings
         db.execute(delete(m.ReadingPassage).where(m.ReadingPassage.subject_id == subject_id))
