@@ -5,8 +5,5 @@
   "compatibility_date": "2025-04-01",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
-  "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "learnify-web" }],
-  "vars": {
-    "API_ORIGIN": "learnify-api-kappa.vercel.app"
-  },
+  "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "learnify-web" }]
 }
