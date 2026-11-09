@@ -100,10 +100,9 @@ export default function TestCenter<T extends Q>({ nodes, questions, busy, onStar
         </div>
         <div className="tc-options">
           <label className="tc-field">How many questions
-            <select className="select" value={limit} onChange={e => setLimit(Number(e.target.value))}>
-              <option value={0}>All of the chosen lessons</option>
-              {[5, 10, 20, 30, 50].map(n => <option key={n} value={n}>{n} questions</option>)}
-            </select>
+            <input className="input" type="number" inputMode="numeric" min={1} max={total || undefined} step={1} list="tc-limit-presets" placeholder="All of the chosen lessons"
+              value={limit || ""} onChange={e => setLimit(Math.max(0, Math.floor(Number(e.target.value)) || 0))} />
+            <datalist id="tc-limit-presets">{[5, 10, 20, 30, 50].map(n => <option key={n} value={n} />)}</datalist>
           </label>
           <label className="tc-check"><input type="checkbox" checked={shuffle} onChange={e => setShuffle(e.target.checked)} /> Shuffle</label>
           <label className="tc-check"><input type="checkbox" checked={timed} onChange={e => setTimed(e.target.checked)} /> Timed (1 min per question)</label>
