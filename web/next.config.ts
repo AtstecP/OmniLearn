@@ -22,7 +22,9 @@ const configured = process.env.API_ORIGIN || wranglerVar("API_ORIGIN");
 if (process.env.WORKERS_CI && !configured) {
   throw new Error('API_ORIGIN is not set. Put your API address in web/wrangler.jsonc under "vars" (for example "API_ORIGIN": "https://your-api.vercel.app"), or add API_ORIGIN as a Cloudflare BUILD variable, then rebuild.');
 }
-const apiOrigin = (configured || "http://localhost:8000").replace(/\/$/, "");
+// A bare host such as "api.example.com" would become a relative rewrite (the site proxying to itself), so add https://.
+const withScheme = (v: string) => (/^https?:\/\//i.test(v) ? v : `https://${v}`);
+const apiOrigin = withScheme(configured || "http://localhost:8000").replace(/\/+$/, "");
 
 const nextConfig: NextConfig = {
   output: "standalone",
