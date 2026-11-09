@@ -483,7 +483,7 @@ input[type=checkbox]{width:18px;height:18px;flex:none}
 .legend-swatch.done{background:var(--success-soft);border-color:var(--success)}
 .roadmap-map-actions{display:flex;align-items:center;gap:6px}
 .zoom-label{font-size:13px;color:var(--muted);min-width:44px;text-align:center}
-.roadmap-map-scroll{overflow-x:auto;overflow-y:visible;padding:8px 0 24px}
+.roadmap-map-scroll{overflow-x:auto;overflow-y:visible;padding:8px 0 24px;touch-action:pan-x pan-y;overscroll-behavior-x:contain}
 .roadmap-map-frame{margin:0 auto}
 .roadmap-map-hint{font-size:14px;color:var(--ink-2);background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent-strong) 35%,transparent);border-radius:var(--r);padding:10px 14px;margin:0 0 12px}
 .roadmap-map-canvas{position:relative;transform-origin:0 0}
@@ -780,3 +780,42 @@ input[type=checkbox]{width:18px;height:18px;flex:none}
 @media (max-width:767px){.test-row:has(.tc-pick){grid-template-columns:auto minmax(0,1fr)}}
 .tc-bulk{margin-top:8px}
 .node-sub{border-left:3px solid var(--line-strong)}
+
+/* Phones: one menu button (three lines) in the top bar opens a slide-in menu with everything:
+   topic picker, all pages, import, theme, settings and sign out. No bottom bar. */
+.menu-btn,.drawer-backdrop,.drawer-actions{display:none}
+.topbar-left{display:flex;align-items:center;gap:10px;min-width:0}
+@media (max-width:767px){
+  :root{--tabbar-h:env(safe-area-inset-bottom)}
+  .menu-btn{display:inline-grid;flex:none;width:44px;height:44px}
+  .topbar{position:sticky;top:0;z-index:30;justify-content:flex-start}
+  .top-actions{display:none}
+  .breadcrumb strong{font-size:18px}
+  .drawer-backdrop{display:block;position:fixed;inset:0;z-index:55;background:rgb(10 14 30/.5);opacity:0;pointer-events:none;transition:opacity .2s}
+  .drawer-backdrop.open{opacity:1;pointer-events:auto}
+  .sidebar{position:fixed;inset:0 auto 0 0;width:min(320px,86vw);height:100dvh;flex-direction:column;align-items:stretch;gap:0;overflow-y:auto;overscroll-behavior:contain;
+    padding:max(18px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));
+    border-right:1px solid var(--line);border-bottom:0;transform:translateX(-104%);visibility:hidden;transition:transform .22s ease,visibility 0s linear .22s;z-index:60}
+  .sidebar.open{transform:none;visibility:visible;transition:transform .22s ease;box-shadow:var(--shadow)}
+  .brand{margin:0 6px 18px}
+  .workspace-label{display:block}
+  .subject-select-wrap{flex:none;margin:0 0 16px}
+  .subject-picker-trigger{justify-content:flex-start;padding:0 12px;height:48px}
+  .subject-picker-menu{position:static;width:auto;margin-top:6px;box-shadow:none}
+  .main-nav{position:static;display:grid;grid-template-columns:minmax(0,1fr);gap:4px;padding:0;border:0;box-shadow:none;background:transparent}
+  .main-nav::after{display:none}
+  .nav-item{flex-direction:row;justify-content:flex-start;gap:12px;min-height:48px;padding:0 12px;font-size:15px;text-align:left;background:transparent;color:var(--ink-2);border-radius:var(--r)}
+  .nav-item:hover{background:var(--surface-2)}
+  .nav-item.active{background:var(--primary);color:var(--on-primary)}
+  .nav-item.active .nav-icon{background:transparent;color:var(--accent);width:22px;height:auto;border-radius:0}
+  .nav-icon{width:22px;height:auto}
+  .nav-label{display:block;flex:1}
+  .nav-label-short{display:none}
+  .nav-count{position:static;margin-left:auto}
+  .drawer-actions{display:grid;gap:4px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+  .sidebar-bottom{display:grid;margin-top:auto;padding-top:16px}
+  .storage-note,.profile-name{display:block}
+  .storage-note{display:flex}
+  .profile-button{flex-direction:row;padding:6px 4px}
+  .content{padding-bottom:calc(var(--tabbar-h) + 28px)}
+}

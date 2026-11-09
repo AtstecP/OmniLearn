@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 /*
  * Mind-map view of a subject's roadmap.
@@ -129,6 +129,9 @@ export default function RoadmapMap({ nodes, statuses, onOpen, onRename, onAdd, o
   const [scale, setScale] = useState(1);
   const [userZoomed, setUserZoomed] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const scaleRef = useRef(1);
+  const pendingScroll = useRef<number | null>(null);
+  scaleRef.current = scale;
 
   const { boxes, lines, height } = useMemo(() => layout(nodes), [nodes]);
   const tree = useMemo(() => buildTree(nodes), [nodes]);
@@ -145,6 +148,52 @@ export default function RoadmapMap({ nodes, statuses, onOpen, onRename, onAdd, o
     observer.observe(el);
     return () => observer.disconnect();
   }, [userZoomed]);
+
+  // Pinch to zoom the map itself. Two fingers on the map scale only the map: the page keeps its size
+  // (touch-action stops the browser's own page zoom there, and gesturestart covers iOS Safari).
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    let pinch: { d: number; scale: number; mx: number; sl: number } | null = null;
+    const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const start = (e: TouchEvent) => {
+      if (e.touches.length !== 2) return;
+      const rect = el.getBoundingClientRect();
+      pinch = { d: dist(e.touches) || 1, scale: scaleRef.current, mx: (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left, sl: el.scrollLeft };
+      setUserZoomed(true);
+    };
+    const move = (e: TouchEvent) => {
+      if (!pinch || e.touches.length !== 2) return;
+      e.preventDefault();
+      const next = Math.min(3, Math.max(0.3, +(pinch.scale * dist(e.touches) / pinch.d).toFixed(3)));
+      pendingScroll.current = ((pinch.sl + pinch.mx) / pinch.scale) * next - pinch.mx; // keep the point between the fingers in place
+      setScale(next);
+    };
+    const end = (e: TouchEvent) => { if (e.touches.length < 2) pinch = null; };
+    const block = (e: Event) => e.preventDefault();
+    el.addEventListener("touchstart", start, { passive: true });
+    el.addEventListener("touchmove", move, { passive: false });
+    el.addEventListener("touchend", end);
+    el.addEventListener("touchcancel", end);
+    el.addEventListener("gesturestart", block);
+    el.addEventListener("gesturechange", block);
+    // Android Chrome: no page zoom while the map is on screen (the map has its own zoom).
+    const meta = document.querySelector('meta[name="viewport"]');
+    const before = meta?.getAttribute("content") ?? null;
+    if (meta && before) meta.setAttribute("content", before.replace(/,?\s*(maximum-scale|user-scalable)=[^,]*/g, "") + ", maximum-scale=1, user-scalable=no");
+    return () => {
+      el.removeEventListener("touchstart", start);
+      el.removeEventListener("touchmove", move);
+      el.removeEventListener("touchend", end);
+      el.removeEventListener("touchcancel", end);
+      el.removeEventListener("gesturestart", block);
+      el.removeEventListener("gesturechange", block);
+      if (meta && before !== null) meta.setAttribute("content", before);
+    };
+  }, []);
+  useLayoutEffect(() => {
+    if (pendingScroll.current !== null && wrapRef.current) { wrapRef.current.scrollLeft = Math.max(0, pendingScroll.current); pendingScroll.current = null; }
+  }, [scale]);
 
   useEffect(() => { setTitleDraft(node?.title || ""); setChildDraft(""); setError(""); }, [selected, node?.title]);
   useEffect(() => { if (selected && !byId.has(selected)) setSelected(null); }, [byId, selected]);
@@ -200,9 +249,9 @@ export default function RoadmapMap({ nodes, statuses, onOpen, onRename, onAdd, o
           <span><i className="legend-swatch done" />Mastered</span>
         </div>
         <div className="roadmap-map-actions">
-          <button className="btn small" type="button" onClick={() => { setUserZoomed(true); setScale(s => Math.max(0.4, +(s - 0.1).toFixed(2))); }} aria-label="Zoom out">−</button>
+          <button className="btn small" type="button" onClick={() => { setUserZoomed(true); setScale(s => Math.max(0.3, +(s - 0.1).toFixed(2))); }} aria-label="Zoom out">−</button>
           <span className="zoom-label">{Math.round(scale * 100)}%</span>
-          <button className="btn small" type="button" onClick={() => { setUserZoomed(true); setScale(s => Math.min(1.6, +(s + 0.1).toFixed(2))); }} aria-label="Zoom in">+</button>
+          <button className="btn small" type="button" onClick={() => { setUserZoomed(true); setScale(s => Math.min(3, +(s + 0.1).toFixed(2))); }} aria-label="Zoom in">+</button>
           <button className={`btn small ${editing ? "primary" : ""}`} type="button" onClick={() => { setEditing(e => !e); setSelected(null); }}>
             {editing ? "✓ Done editing" : "✎ Edit map"}
           </button>
