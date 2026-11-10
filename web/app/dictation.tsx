@@ -86,9 +86,9 @@ export default function Dictation({ title, subjectId, cards, onClose }: { title:
     const fit = () => {
       const el = shell.current;
       if (!el) return;
-      el.style.top = vv.offsetTop + "px";
-      el.style.height = vv.height + "px";
-      el.style.bottom = "auto";
+      // The screen stays full size (so the page never shows through); only the room under the keyboard is reserved.
+      const covered = Math.max(0, el.clientHeight - (vv.offsetTop + vv.height));
+      el.style.setProperty("--kb", covered + "px");
     };
     fit();
     vv.addEventListener("resize", fit); vv.addEventListener("scroll", fit);
