@@ -78,6 +78,22 @@ export default function Dictation({ title, subjectId, cards, onClose }: { title:
     try { const n = Number(localStorage.getItem(posKey(subjectId, title))); if (Number.isFinite(n) && n > 0 && n < usable.length) setSaved(n); } catch { /* ignore */ }
   }, [subjectId, title, usable.length]);
   useEffect(() => () => stopSpeaking(), []);
+  // Keep the screen inside the visible area when the phone keyboard opens, so the blocks are not covered.
+  const shell = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const fit = () => {
+      const el = shell.current;
+      if (!el) return;
+      el.style.top = vv.offsetTop + "px";
+      el.style.height = vv.height + "px";
+      el.style.bottom = "auto";
+    };
+    fit();
+    vv.addEventListener("resize", fit); vv.addEventListener("scroll", fit);
+    return () => { vv.removeEventListener("resize", fit); vv.removeEventListener("scroll", fit); };
+  }, []);
   const update = (patch: Partial<Settings>) => setSettings(s => { const n = { ...s, ...patch }; save(n); return n; });
 
   const card = phase === "play" ? order[index] : undefined;
@@ -323,7 +339,7 @@ export default function Dictation({ title, subjectId, cards, onClose }: { title:
   }
 
   const node = (
-    <div className="vp dict" role="dialog" aria-modal="true" aria-label="Dictation practice">
+    <div ref={shell} className="vp dict" role="dialog" aria-modal="true" aria-label="Dictation practice">
       <div className="vp-top">
         <button type="button" className="vp-icon" onClick={onClose} aria-label="Close dictation"><X size={20} /></button>
         {phase === "play" ? (
