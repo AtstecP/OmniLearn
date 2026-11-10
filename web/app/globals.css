@@ -392,7 +392,7 @@ input[type=checkbox]{width:18px;height:18px;flex:none}
 }
 
 /* ---------- Vocabulary practice (vocab-practice.tsx): full screen, nothing to scroll ---------- */
-.vp{position:fixed;top:0;left:0;right:0;height:100vh;height:100dvh;z-index:75;display:flex;flex-direction:column;background:var(--bg);color:var(--ink);outline:0;
+.vp{position:fixed;inset:0;z-index:75;display:flex;flex-direction:column;background:var(--bg);color:var(--ink);outline:0;
   padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left)}
 .vp-top{display:flex;align-items:center;gap:10px;padding:10px 14px;width:min(760px,100%);margin:0 auto;flex:none}
 .vp-icon{display:inline-grid;place-items:center;width:44px;height:44px;flex:none;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);color:var(--ink-2);padding:0}
