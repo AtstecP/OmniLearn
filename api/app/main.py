@@ -14,7 +14,7 @@ from .gzip_body import GzipRequestMiddleware
 from . import models as m
 from .auth import clear_session_cookie, get_current_user, hash_password, set_session_cookie, verify_password
 from .bundle import Bundle, BundleError, Lesson, Question, parse_bundle, parse_question
-from .schemas import (AccountDeleteIn, AttemptIn, CardCreate, LoginIn, NodeCreate, NodeUpdate, BulkIdsIn, PasswordChangeIn, ReadingUpdate, RegisterIn,
+from .schemas import (AccountDeleteIn, AttemptIn, CardCreate, LoginIn, NodeCreate, NodeUpdate, BulkIdsIn, PasswordChangeIn, PhraseIn, ReadingUpdate, RegisterIn,
                       ReviewIn, RoadmapLayoutIn, SubjectDeleteIn, SubjectIn, TestCreate)
 
 if settings.cookie_secure and (settings.jwt_secret == DEFAULT_JWT_SECRET or len(settings.jwt_secret) < 32):
@@ -256,6 +256,27 @@ def reading_rows(db: Session, subject_id: UUID):
     return list(grouped.values())
 
 
+def phrase_rows(db: Session, subject_id: UUID):
+    rows = db.scalars(select(m.DictationPhrase).where(m.DictationPhrase.subject_id == subject_id)
+                      .order_by(m.DictationPhrase.order_index, m.DictationPhrase.created_at)).all()
+    return [{"id": p.id, "answer": p.answer, "translation": p.translation, "audio_url": p.audio_url, "tags": p.tags} for p in rows]
+
+
+@app.put("/subjects/{subject_id}/phrases/{phrase_id}")
+def update_phrase(subject_id: UUID, phrase_id: UUID, payload: PhraseIn, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+    obj = require_item(db, m.DictationPhrase, subject_id, phrase_id, user, "Phrase")
+    for key, value in payload.model_dump().items():
+        setattr(obj, key, value)
+    commit_or_422(db); db.refresh(obj)
+    return {"id": obj.id, "answer": obj.answer, "translation": obj.translation, "audio_url": obj.audio_url, "tags": obj.tags}
+
+
+@app.delete("/subjects/{subject_id}/phrases/{phrase_id}", status_code=204)
+def delete_phrase(subject_id: UUID, phrase_id: UUID, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+    obj = require_item(db, m.DictationPhrase, subject_id, phrase_id, user, "Phrase")
+    db.delete(obj); db.commit()
+
+
 def mistake_rows(db: Session, subject_id: UUID, user: m.User):
     rows = db.execute(
         select(m.UserTestAttempt, m.TestQuestion)
@@ -295,11 +316,12 @@ def subject_workspace(subject_id: UUID, db: Session = Depends(get_db), user: m.U
     cards = vocab_rows(db, subject_id, user)
     readings = reading_rows(db, subject_id)
     mistakes = mistake_rows(db, subject_id, user)
+    phrases = phrase_rows(db, subject_id)
     alive = {"lesson": {str(n["id"]) for n in roadmap}, "question": {str(t.id) for t in tests}, "reading": {str(r["id"]) for r in readings}}
     favs = db.execute(select(m.UserFavorite.kind, m.UserFavorite.item_id).where(m.UserFavorite.user_id == user.id, m.UserFavorite.subject_id == subject_id)
                       .order_by(m.UserFavorite.created_at.desc())).all()
     favorites = [{"kind": k, "item_id": str(i)} for k, i in favs if str(i) in alive.get(k, ())]
-    return {"roadmap": roadmap, "tests": tests, "cards": cards, "readings": readings, "mistakes": mistakes, "progress": progress, "favorites": favorites,
+    return {"roadmap": roadmap, "tests": tests, "cards": cards, "readings": readings, "phrases": phrases, "mistakes": mistakes, "progress": progress, "favorites": favorites,
             "dashboard": dashboard_numbers(subject_id, roadmap, progress, tests, cards, readings, mistakes)}
 
 
@@ -663,6 +685,11 @@ def write_bundle(db: Session, subject: m.Subject, bundle: Bundle, lesson_id: UUI
         rows.append(m.VocabCard(id=uuid4(), subject_id=subject.id, term=c.term, definition=c.definition, part_of_speech=c.part_of_speech,
                                 example_sentence=c.example, image_url=c.image_url, audio_url=c.audio_url, tags=c.tags, source="import"))
 
+    phrase_start = next_position(db, m.DictationPhrase, m.DictationPhrase.subject_id == subject.id)
+    for i, p in enumerate(bundle.phrases):
+        rows.append(m.DictationPhrase(id=uuid4(), subject_id=subject.id, order_index=phrase_start + i, answer=p.answer, translation=p.translation,
+                                      audio_url=p.audio_url, tags=p.tags))
+
     reading_start = next_position(db, m.ReadingPassage, m.ReadingPassage.subject_id == subject.id)
     for i, r in enumerate(bundle.readings):
         passage = m.ReadingPassage(id=uuid4(), subject_id=subject.id, order_index=reading_start + i, title=r.title, cefr_level=r.level,
@@ -709,7 +736,7 @@ def replace_content(subject_id: UUID, part: str, payload: Any = Body(...), topic
     progress and reading questions are deleted with them, so nothing stale is left behind.
     For vocabulary, `topic` limits the replacement to one set of words: cards tagged with it, or the
     untagged ones for "General". Other cards are not touched."""
-    if part not in ("path", "vocabulary", "readings"):
+    if part not in ("path", "vocabulary", "readings", "phrases"):
         raise HTTPException(404, "Unknown part")
     subject = require_subject(db, subject_id, user)
     try:
@@ -730,6 +757,12 @@ def replace_content(subject_id: UUID, part: str, payload: Any = Body(...), topic
         if topic and topic != "All words":
             cond.append(func.cardinality(m.VocabCard.tags) == 0 if topic == "General" else m.VocabCard.tags.any(topic))
         db.execute(delete(m.VocabCard).where(*cond))
+    elif part == "phrases":
+        keep.phrases = bundle.phrases
+        cond = [m.DictationPhrase.subject_id == subject_id]
+        if topic and topic != "All phrases":
+            cond.append(func.cardinality(m.DictationPhrase.tags) == 0 if topic == "General" else m.DictationPhrase.tags.any(topic))
+        db.execute(delete(m.DictationPhrase).where(*cond))
     else:
         keep.readings = bundle.readings
         db.execute(delete(m.ReadingPassage).where(m.ReadingPassage.subject_id == subject_id))
@@ -776,6 +809,7 @@ def export_bundle(subject_id: UUID, db: Session = Depends(get_db), user: m.User 
         "questions": [export_question(t.prompt, t.options, t.correct_index, t.explanation, t.tags) for t in loose],
         "vocabulary": [compact({"term": c.term, "definition": c.definition, "part_of_speech": c.part_of_speech, "example": c.example_sentence,
                                 "image_url": c.image_url, "audio_url": c.audio_url, "tags": c.tags}) for c in cards],
+        "phrases": [compact({"answer": p["answer"], "translation": p["translation"], "audio_url": p["audio_url"], "tags": p["tags"]}) for p in phrase_rows(db, subject_id)],
         "readings": [compact({"title": r["title"], "level": r["level"], "content": r["passage_markdown"], "audio_url": r["audio_url"],
                               "questions": [export_question(q["prompt"], q["options"], q["correct_index"], q["explanation"]) for q in r["questions"]]})
                      for r in reading_rows(db, subject_id)],

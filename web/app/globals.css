@@ -819,3 +819,49 @@ input[type=checkbox]{width:18px;height:18px;flex:none}
   .profile-button{flex-direction:row;padding:6px 4px}
   .content{padding-bottom:calc(var(--tabbar-h) + 28px)}
 }
+
+/* ---------- Dictation (dictation.tsx): listen, then type what you hear ---------- */
+.dict-scroll{flex:1;min-height:0;overflow-y:auto;display:flex;justify-content:center;padding:8px 16px calc(24px + env(safe-area-inset-bottom))}
+.dict-body{width:min(720px,100%);display:flex;flex-direction:column;align-items:center;text-align:center;gap:14px;margin:auto 0}
+.dict-title{font:800 clamp(22px,5vw,30px)/1.2 var(--font);margin:0}
+.dict-count{font-size:13px;color:var(--muted);white-space:nowrap}
+.dict-count b{color:var(--success);margin-left:6px}
+.dict-translation{margin:0;font:700 clamp(20px,5.2vw,30px)/1.35 var(--font);color:var(--ink);overflow-wrap:anywhere}
+.dict-audio{display:flex;gap:12px;justify-content:center}
+.dict-audio .vp-speak.small{width:52px;height:52px}
+.dict-slots{display:flex;flex-wrap:wrap;gap:8px 12px;justify-content:center;width:100%;padding:10px 4px}
+.dict-slot{display:inline-block;text-align:center;font:600 clamp(20px,5vw,28px)/1.3 var(--font);border-bottom:3px solid var(--line-strong);padding:0 4px 2px;color:var(--ink);transition:color .12s,border-color .12s}
+.dict-slot.typing{border-color:var(--primary)}
+.dict-slot.typing-bad,.dict-slot.wrong{border-color:var(--danger);color:var(--danger)}
+.dict-slot.right{border-color:var(--success);color:var(--success)}
+.dict-slot.extra{border-style:dashed}
+.dict-input{position:absolute;left:0;top:0;width:1px;height:1px;opacity:0;border:0;padding:0;margin:0;font-size:16px;pointer-events:none}
+.dict-body{position:relative}
+.dict-slots{cursor:text}
+.dict-slot.cursor{position:relative}
+.dict-slot.cursor::after{content:"";display:inline-block;width:2px;height:1.05em;margin-left:2px;vertical-align:-.15em;background:var(--primary);animation:dict-caret 1s steps(1) infinite}
+.dict-tip{font-weight:500;font-size:13px;color:var(--muted)}
+@keyframes dict-caret{0%,100%{opacity:1}50%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.dict-slot.cursor::after{animation:none}}
+.dict-msg{min-height:24px;font-weight:700;font-size:15px}
+.dict-msg .ok{display:inline-flex;align-items:center;gap:6px;color:var(--success)}
+.dict-msg .bad{color:var(--danger)}
+.dict-actions{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;width:100%}
+.dict-actions .btn{min-height:48px;min-width:110px}
+.dict-settings{display:grid;gap:10px;text-align:left;width:100%;padding:14px 16px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
+.dict-settings label{display:flex;align-items:center;gap:10px;font-size:15px}
+.dict-settings input[type=checkbox]{width:20px;height:20px;accent-color:var(--accent-strong)}
+.dict-settings .dict-lang{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px}
+.dict-pop{width:min(720px,calc(100% - 28px));margin:0 auto 8px;flex:none}
+.dict-review{width:100%;text-align:left;display:grid;gap:8px;max-height:36vh;overflow-y:auto}
+.dict-review div{display:grid;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
+.dict-review small{color:var(--muted)}
+.dict-topics{margin-top:4px}
+@keyframes dict-shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-7px)}40%{transform:translateX(7px)}60%{transform:translateX(-5px)}80%{transform:translateX(5px)}}
+.dict-slots.shake,.dict-slot.shake{animation:dict-shake .42s ease}
+@media (prefers-reduced-motion:reduce){.dict-slots.shake,.dict-slot.shake{animation:none}}
+
+.vocab-block{flex:1;min-width:0;text-align:left;border:0;background:transparent;color:var(--ink);padding:4px 0;cursor:pointer}
+.vocab-block strong{display:block}
+.vocab-block small{display:block;color:var(--muted)}
+.vocab-block:hover strong{color:var(--primary)}

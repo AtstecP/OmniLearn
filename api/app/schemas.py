@@ -150,6 +150,22 @@ class NodePlacement(BaseModel):
     order_index: int = Field(ge=0)
 
 
+class PhraseIn(BaseModel):
+    answer: str = Field(min_length=1, max_length=2000)
+    translation: str = Field(default="", max_length=2000)
+    audio_url: str | None = Field(default=None, max_length=1024)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def check(self):
+        self.answer = _clean_title(self.answer)
+        self.translation = self.translation.strip()
+        if self.audio_url is not None and not self.audio_url.strip().lower().startswith(("http://", "https://")):
+            self.audio_url = None
+        self.tags = [t.strip()[:64] for t in self.tags if t and t.strip()]
+        return self
+
+
 class BulkIdsIn(BaseModel):
     ids: list[UUID] = Field(max_length=5000)
 

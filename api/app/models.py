@@ -101,6 +101,18 @@ class VocabCard(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class DictationPhrase(Base):
+    __tablename__ = "dictation_phrases"
+    id: Mapped[PythonUUID] = uuid_pk()
+    subject_id: Mapped[PythonUUID] = mapped_column(UUID(as_uuid=True), ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False)
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    translation: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    audio_url: Mapped[str | None] = mapped_column(String(1024))
+    tags: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ReadingPassage(Base):
     __tablename__ = "reading_passages"
     id: Mapped[PythonUUID] = uuid_pk()

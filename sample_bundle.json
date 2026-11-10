@@ -98,5 +98,21 @@
         }
       ]
     }
+  ],
+  "phrases": [
+    {
+      "answer": "Where is the station?",
+      "translation": "Où est la gare ?",
+      "tags": [
+        "travel"
+      ]
+    },
+    {
+      "answer": "I would like a coffee, please.",
+      "translation": "Je voudrais un café, s'il vous plaît.",
+      "tags": [
+        "cafe"
+      ]
+    }
   ]
 }

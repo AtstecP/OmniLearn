@@ -53,7 +53,7 @@ function chunks(text: string, max = 220): string[] {
 }
 
 /** Speak text in the given language code (e.g. "fr", "zh-CN"); null lets the browser choose. */
-export function speak(text: string, lang: string | null, onEnd?: () => void) {
+export function speak(text: string, lang: string | null, onEnd?: () => void, rate = 0.95) {
   if (!canSpeak() || !text.trim()) { onEnd?.(); return; }
   const synth = window.speechSynthesis;
   synth.cancel();
@@ -64,7 +64,7 @@ export function speak(text: string, lang: string | null, onEnd?: () => void) {
     try { if (voice) u.voice = voice; } catch { /* ignore */ }
     const l = voice?.lang || lang;
     if (l) u.lang = l;
-    u.rate = 0.95;
+    u.rate = rate;
     if (i === list.length - 1) { u.onend = () => onEnd?.(); u.onerror = () => onEnd?.(); }
     synth.speak(u);
   });

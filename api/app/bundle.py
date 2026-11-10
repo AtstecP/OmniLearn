@@ -10,6 +10,7 @@ The canonical format has no IDs. Structure comes from nesting and order:
          "lessons": [ {"title": "Sub-topic", "content": "...", "questions": [...], "lessons": [...]} ]}
       ],
       "questions":  [ ...question-bank questions not tied to a lesson... ],
+      "phrases": [ {"answer": "Sentence to listen to and type", "translation": "Shown to the learner", "tags": ["topic"]} ],
       "vocabulary": [ {"term": "...", "definition": "...", "part_of_speech": "...", "example": "...", "tags": ["topic"]} ],
       "readings":   [ {"title": "...", "content": "Markdown", "level": "B1", "questions": [...]} ]
     }
@@ -32,7 +33,7 @@ from typing import Any
 
 MAX_ERRORS = 25
 MAX_DEPTH = 6
-LIMITS = {"lessons": 5000, "questions": 20000, "vocabulary": 30000, "readings": 1000}
+LIMITS = {"lessons": 5000, "questions": 20000, "vocabulary": 30000, "readings": 1000, "phrases": 30000}
 TITLE_MAX, LEVEL_MAX, TERM_MAX, POS_MAX, URL_MAX = 255, 32, 255, 64, 1024
 TEXT_MAX = 200_000
 OPTIONS_MIN, OPTIONS_MAX = 2, 20
@@ -46,6 +47,9 @@ K_CHILDREN = ("lessons", "children", "subtopics", "sub_topics", "topics", "sub_l
 K_CONTENT = ("content", "content_markdown", "lesson_markdown", "markdown", "body", "text", "lesson", "notes", "explanation")
 K_QUESTIONS = ("questions", "tests", "quiz", "quizzes", "test_questions", "checkpoint", "exercises", "test_bank", "question_bank", "assessments")
 K_VOCAB = ("vocabulary", "cards", "vocab", "vocab_cards", "vocabulary_cards", "words", "flashcards", "glossary")
+K_PHRASES = ("phrases", "dictation", "dictations", "dictation_phrases", "sentences", "listening")
+K_PHRASE_ANSWER = ("answer", "text", "phrase", "sentence", "target", "term")
+K_PHRASE_SHOWN = ("translation", "meaning", "prompt", "hint", "native", "definition")
 K_READINGS = ("readings", "reading_passages", "passages", "reading", "texts")
 K_PROMPT = ("question", "prompt", "q", "text", "stem")
 K_OPTIONS = ("options", "choices", "answers", "alternatives")
@@ -98,6 +102,14 @@ class Card:
 
 
 @dataclass
+class Phrase:
+    answer: str
+    translation: str = ""
+    audio_url: str | None = None
+    tags: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Reading:
     title: str
     content: str
@@ -115,6 +127,7 @@ class Bundle:
     questions: list[Question] = field(default_factory=list)
     vocabulary: list[Card] = field(default_factory=list)
     readings: list[Reading] = field(default_factory=list)
+    phrases: list[Phrase] = field(default_factory=list)
 
     def counts(self) -> dict[str, int]:
         lessons = questions = 0
@@ -129,11 +142,12 @@ class Bundle:
             "questions": questions + len(self.questions),
             "vocabulary": len(self.vocabulary),
             "readings": len(self.readings),
+            "phrases": len(self.phrases),
             "reading_questions": sum(len(r.questions) for r in self.readings),
         }
 
     def is_empty(self) -> bool:
-        return not (self.lessons or self.questions or self.vocabulary or self.readings)
+        return not (self.lessons or self.questions or self.vocabulary or self.readings or self.phrases)
 
 
 class _Parser:
@@ -319,6 +333,16 @@ class _Parser:
                     example=self.text(raw, K_EXAMPLE, path, max_len=5000), image_url=self.url(raw, ("image_url", "image"), path),
                     audio_url=self.url(raw, ("audio_url", "audio"), path), tags=self.tags(raw, path))
 
+    def phrase(self, raw: Any, path: str) -> Phrase | None:
+        if not isinstance(raw, dict):
+            self.err(path, "must be an object with the phrase (answer) and its translation")
+            return None
+        answer = self.text(raw, K_PHRASE_ANSWER, path, required=True, max_len=2000, label="answer")
+        if not answer:
+            return None
+        shown = self.text(raw, K_PHRASE_SHOWN, path, max_len=2000) or ""
+        return Phrase(answer=answer, translation=shown, audio_url=self.url(raw, ("audio_url", "audio"), path), tags=self.tags(raw, path))
+
     def reading(self, raw: Any, path: str) -> Reading | None:
         if not isinstance(raw, dict):
             self.err(path, "must be an object with a title and content")
@@ -376,7 +400,7 @@ class _Parser:
         # Unwrap {"course": {...}} / {"bundle": {...}} style envelopes.
         if len(raw) == 1:
             only = next(iter(raw.values()))
-            if isinstance(only, dict) and any(k in only for k in K_LESSONS + K_VOCAB + K_READINGS + K_QUESTIONS):
+            if isinstance(only, dict) and any(k in only for k in K_LESSONS + K_VOCAB + K_READINGS + K_QUESTIONS + K_PHRASES):
                 raw = only
 
         bundle = Bundle(title=self.text(raw, K_TITLE, "", max_len=TITLE_MAX), description=self.text(raw, K_DESC, "", max_len=5000),
@@ -432,12 +456,18 @@ class _Parser:
             if r:
                 bundle.readings.append(r)
 
+        pkey, phrases_raw = self.items(raw, K_PHRASES, "", nested_key="phrases")
+        for i, item in enumerate(phrases_raw):
+            p = self.phrase(item, f"{pkey}[{i}]")
+            if p:
+                bundle.phrases.append(p)
+
         counts = bundle.counts()
         for name, limit in LIMITS.items():
             if counts[name] > limit:
                 self.err(name, f"too many items ({counts[name]}, max {limit} per import)")
         if not self.errors and bundle.is_empty():
-            self.err("", "nothing to import: add lessons, questions, vocabulary or readings")
+            self.err("", "nothing to import: add lessons, questions, vocabulary, readings or phrases")
         return bundle
 
 

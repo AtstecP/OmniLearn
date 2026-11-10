@@ -1,6 +1,6 @@
 "use client";
-import { useEffect, useState } from "react";
-import { Copy, Pencil, Search, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, Copy, Pencil, Search, Trash2 } from "lucide-react";
 import { api, json } from "@/lib/api";
 import { extractJson } from "@/lib/extractJson";
 
@@ -13,13 +13,14 @@ import { extractJson } from "@/lib/extractJson";
  *  - VocabManager: searchable word list with a delete button per card.
  */
 
-export type Part = "path" | "vocabulary" | "readings";
+export type Part = "path" | "vocabulary" | "readings" | "phrases";
 
-const LABEL: Record<Part, string> = { path: "learning path", vocabulary: "vocabulary", readings: "reading texts" };
+const LABEL: Record<Part, string> = { path: "learning path", vocabulary: "vocabulary", readings: "reading texts", phrases: "dictation phrases" };
 const WARN: Record<Part, string> = {
   path: "Saving replaces every lesson and every question of this subject with this JSON. Lessons or questions you removed are deleted for good, together with their answers, mistakes and lesson progress.",
   vocabulary: "Saving replaces all vocabulary cards with this JSON. Removed words are deleted for good, together with their review history.",
   readings: "Saving replaces all reading texts with this JSON. Removed texts and their questions are deleted for good.",
+  phrases: "Saving replaces all dictation phrases with this JSON. Removed phrases are deleted for good.",
 };
 
 function slice(part: Part, bundle: any, topic?: string) {
@@ -27,6 +28,10 @@ function slice(part: Part, bundle: any, topic?: string) {
   if (part === "vocabulary") {
     const all: any[] = bundle.vocabulary || [];
     return { vocabulary: !topic || topic === "All words" ? all : all.filter(c => (c.tags || []).includes(topic) || (topic === "General" && !(c.tags || []).length)) };
+  }
+  if (part === "phrases") {
+    const all: any[] = bundle.phrases || [];
+    return { phrases: !topic || topic === "All phrases" ? all : all.filter(p => (p.tags || []).includes(topic) || (topic === "General" && !(p.tags || []).length)) };
   }
   return { readings: bundle.readings || [] };
 }
@@ -58,13 +63,13 @@ export function JsonEditor({ subjectId, part, topic, onClose, onSaved }: { subje
     setError("");
     const parsed = extractJson(text);
     if ("error" in parsed) { setError(parsed.error); return; }
-    const warn = part === "vocabulary" && topic && topic !== "All words" ? `Saving replaces the words of the set "${topic}" with this JSON. Removed words are deleted for good, together with their review history. Other sets are not touched.` : WARN[part];
+    const warn = part === "vocabulary" && topic && topic !== "All words" ? `Saving replaces the words of the set "${topic}" with this JSON. Removed words are deleted for good, together with their review history. Other sets are not touched.` : part === "phrases" && topic && topic !== "All phrases" ? `Saving replaces the phrases of the set "${topic}" with this JSON. Removed phrases are deleted for good. Other sets are not touched.` : WARN[part];
     if (!window.confirm(`${warn}\n\nSave changes?`)) return;
     setSaving(true);
     try {
       const r = await api<any>(`/subjects/${encodeURIComponent(subjectId)}/content/${part}${topic ? `?topic=${encodeURIComponent(topic)}` : ""}`, json("PUT", parsed.value));
       const c = r.saved || {};
-      onSaved(part === "path" ? `Saved: ${c.lessons ?? 0} lessons, ${c.questions ?? 0} questions.` : part === "vocabulary" ? `Saved ${c.vocabulary ?? 0} words.` : `Saved ${c.readings ?? 0} texts.`);
+      onSaved(part === "path" ? `Saved: ${c.lessons ?? 0} lessons, ${c.questions ?? 0} questions.` : part === "vocabulary" ? `Saved ${c.vocabulary ?? 0} words.` : part === "phrases" ? `Saved ${c.phrases ?? 0} phrases.` : `Saved ${c.readings ?? 0} texts.`);
     } catch (e: any) { setError(e.message); }
     finally { setSaving(false); }
   }
@@ -74,7 +79,7 @@ export function JsonEditor({ subjectId, part, topic, onClose, onSaved }: { subje
     <div className="modal-backdrop" onClick={onClose}>
       <section className="modal json-modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
-          <div><h2>Edit {LABEL[part]}{topic && topic !== "All words" ? `: ${topic}` : ""} as JSON</h2><p>Change the text, add or delete entries, then save. No IDs needed.</p></div>
+          <div><h2>Edit {LABEL[part]}{topic && topic !== "All words" && topic !== "All phrases" ? `: ${topic}` : ""} as JSON</h2><p>Change the text, add or delete entries, then save. No IDs needed.</p></div>
           <button className="close-button" onClick={onClose}>×</button>
         </div>
         <textarea id="json-editor-area" className="textarea json-area" spellCheck={false} value={loading ? "Loading…" : text} disabled={loading}
@@ -93,31 +98,80 @@ export function JsonEditor({ subjectId, part, topic, onClose, onSaved }: { subje
 
 type Card = { id: string; term: string; definition: string; tags?: string[] };
 
-export function VocabManager({ cards, onDelete, onEdit, onClose }: { cards: Card[]; onDelete: (c: Card) => Promise<void>; onEdit: (c: Card) => void; onClose: () => void }) {
+export function VocabManager({ cards, onDelete, onEdit, onClose, onDeleteBlock, onEditBlock, heading = "Manage words", noun = "word" }: {
+  cards: Card[]; onDelete: (c: Card) => Promise<void>; onEdit: (c: Card) => void; onClose: () => void;
+  onDeleteBlock?: (topic: string) => Promise<void>; onEditBlock?: (topic: string) => void; heading?: string; noun?: string;
+}) {
+  const [topic, setTopic] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState("");
-  const list = cards.filter(c => !q.trim() || `${c.term} ${c.definition}`.toLowerCase().includes(q.trim().toLowerCase()));
+  const plural = (n: number) => `${n} ${n === 1 ? noun : noun + "s"}`;
+
+  // Blocks are the topics (tags); a card with several tags is in each of them, one without tags is in "General".
+  const blocks = useMemo(() => {
+    const map = new Map<string, Card[]>();
+    for (const c of cards) for (const t of c.tags?.length ? c.tags : ["General"]) { if (!map.has(t)) map.set(t, []); map.get(t)!.push(c); }
+    return [...map.entries()].map(([name, list]) => ({ name, list }));
+  }, [cards]);
+  const block = topic === null ? null : blocks.find(x => x.name === topic) || { name: topic, list: [] as Card[] };
+  const list = (block?.list || []).filter(c => !q.trim() || `${c.term} ${c.definition}`.toLowerCase().includes(q.trim().toLowerCase()));
+
+  async function removeBlock(name: string, count: number) {
+    if (!onDeleteBlock) return;
+    if (!window.confirm(`Delete the whole block "${name}" with its ${plural(count)}? ${noun.charAt(0).toUpperCase() + noun.slice(1)}s that also belong to other blocks are deleted from those blocks too. This can't be undone.`)) return;
+    setBusy("block:" + name);
+    try { await onDeleteBlock(name); if (topic === name) { setTopic(null); setQ(""); } } finally { setBusy(""); }
+  }
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <section className="modal json-modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
-          <div><h2>Manage words</h2><p>{cards.length} {cards.length === 1 ? "word" : "words"}. Delete the ones you no longer need.</p></div>
+          <div>
+            <h2>{block ? `${heading}: ${block.name}` : heading}</h2>
+            <p>{block ? `${plural(block.list.length)} in this block. Edit or delete single ${noun}s, or the whole block.` : `${blocks.length} ${blocks.length === 1 ? "block" : "blocks"}, ${plural(cards.length)}. Choose a block to edit.`}</p>
+          </div>
           <button className="close-button" onClick={onClose}>×</button>
         </div>
-        <label className="vocab-search"><Search size={16} /><input className="input" placeholder="Search words" value={q} onChange={e => setQ(e.target.value)} /></label>
-        <div className="vocab-manage-list">
-          {list.map(c => (
-            <div className="vocab-manage-row" key={c.id}>
-              <div><strong>{c.term}</strong><small>{c.definition}</small></div>
-              <button className="btn" aria-label={`Edit ${c.term}`} title="Edit" onClick={() => onEdit(c)}><Pencil size={16} /></button>
-              <button className="btn danger" disabled={busy === c.id} aria-label={`Delete ${c.term}`}
-                onClick={async () => { if (!window.confirm(`Delete "${c.term}"? This can't be undone.`)) return; setBusy(c.id); try { await onDelete(c); } finally { setBusy(""); } }}>
-                <Trash2 size={16} />
-              </button>
+
+        {!block ? (
+          <div className="vocab-manage-list">
+            {blocks.map(x => (
+              <div className="vocab-manage-row" key={x.name}>
+                <button type="button" className="vocab-block" onClick={() => { setTopic(x.name); setQ(""); }}>
+                  <strong>{x.name}</strong><small>{plural(x.list.length)}</small>
+                </button>
+                {onDeleteBlock && (
+                  <button className="btn danger" disabled={busy === "block:" + x.name} aria-label={`Delete block ${x.name}`} title="Delete the whole block"
+                    onClick={() => removeBlock(x.name, x.list.length)}><Trash2 size={16} /></button>
+                )}
+              </div>
+            ))}
+            {!blocks.length && <div className="empty-state"><strong>{`No ${noun}s`}</strong></div>}
+          </div>
+        ) : (
+          <>
+            <div className="filter-row" style={{ marginBottom: 10 }}>
+              <button className="btn small" type="button" onClick={() => { setTopic(null); setQ(""); }}><ArrowLeft size={14} />All blocks</button>
+              {onEditBlock && <button className="btn small" type="button" onClick={() => onEditBlock(block.name)}><Pencil size={14} />Edit block as JSON</button>}
+              {onDeleteBlock && <button className="btn small danger" type="button" disabled={busy === "block:" + block.name || !block.list.length} onClick={() => removeBlock(block.name, block.list.length)}><Trash2 size={14} />Delete whole block</button>}
             </div>
-          ))}
-          {!list.length && <div className="empty-state"><strong>{cards.length ? "No matches" : "No words"}</strong></div>}
-        </div>
+            <label className="vocab-search"><Search size={16} /><input className="input" placeholder={`Search in ${block.name}`} value={q} onChange={e => setQ(e.target.value)} /></label>
+            <div className="vocab-manage-list">
+              {list.map(c => (
+                <div className="vocab-manage-row" key={c.id}>
+                  <div><strong>{c.term}</strong><small>{c.definition}</small></div>
+                  <button className="btn" aria-label={`Edit ${c.term}`} title="Edit" onClick={() => onEdit(c)}><Pencil size={16} /></button>
+                  <button className="btn danger" disabled={busy === c.id} aria-label={`Delete ${c.term}`}
+                    onClick={async () => { if (!window.confirm(`Delete "${c.term}"? This can't be undone.`)) return; setBusy(c.id); try { await onDelete(c); } finally { setBusy(""); } }}>
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
+              {!list.length && <div className="empty-state"><strong>{block.list.length ? "No matches" : "This block is empty"}</strong></div>}
+            </div>
+          </>
+        )}
       </section>
     </div>
   );
