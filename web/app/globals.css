@@ -865,3 +865,6 @@ input[type=checkbox]{width:18px;height:18px;flex:none}
 .vocab-block strong{display:block}
 .vocab-block small{display:block;color:var(--muted)}
 .vocab-block:hover strong{color:var(--primary)}
+
+/* The top bar clears the status bar / notch if a browser still reports an inset. */
+@media (max-width:767px){.topbar{padding-top:env(safe-area-inset-top);height:calc(var(--topbar-h) + env(safe-area-inset-top))}}
