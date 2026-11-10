@@ -304,6 +304,7 @@ export default function Dictation({ title, subjectId, cards, onClose }: { title:
         <div className="dict-audio">
           <button type="button" className="vp-speak small" onClick={() => { sfx.unlock(); play(); focusInput(); }} aria-label="Play the sentence" title="Play"><Volume2 size={20} /></button>
           <button type="button" className="vp-speak small" onClick={() => { sfx.unlock(); play(true); focusInput(); }} aria-label="Play slowly" title="Play slowly"><Snail size={20} /></button>
+          <button type="button" className="vp-speak small" onClick={() => { sfx.unlock(); hint(); focusInput(); }} disabled={done} aria-label="Hint: reveal the next word" title="Hint"><Lightbulb size={20} /></button>
         </div>
         {slots}
         <input ref={inputRef} className="dict-input" value={input} readOnly={done}
@@ -316,9 +317,6 @@ export default function Dictation({ title, subjectId, cards, onClose }: { title:
           {!done && !checked && input === "" ? <span className="dict-tip">Just start typing: your keys go straight into the blocks. Space moves to the next block.</span> : null}
           {done ? <span className="ok"><Check size={16} /> Correct{errors || hints ? ` (${errors} ${errors === 1 ? "mistake" : "mistakes"}, ${hints} ${hints === 1 ? "hint" : "hints"})` : "!"}</span>
             : checked ? <span className="bad">Not quite: fix the red words.</span> : null}
-        </div>
-        <div className="dict-actions">
-          <button className="btn" onClick={hint} disabled={done}><Lightbulb size={16} />Hint</button>
         </div>
       </div>
     );
