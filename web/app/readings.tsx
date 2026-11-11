@@ -1,7 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Newspaper, Square, Star, Trash2, Volume2 } from "lucide-react";
-import { LANGS } from "@/lib/translate";
 import { canSpeak, guessLang, langName, readerLang, setReader, speak, stopSpeaking } from "@/lib/speech";
 
 /* Reading room tiles: title, level and a "Finished" mark only. Finished marks are
@@ -50,14 +49,12 @@ export default function ReadingTiles({ readings, done, favs, onFav, onOpen, onDe
   );
 }
 
-const langKey = (subjectId: string) => `learnify.reading.lang.${subjectId}`;
 const voiceKey = (subjectId: string) => `learnify.reading.voice.${subjectId}`;
 const plainText = (md: string) => md.replace(/```[\s\S]*?```/g, " ").replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/^[#>\s-]*[-*+]\s+/gm, "").replace(/^#{1,6}\s+/gm, "").replace(/[*_`~|]/g, "");
 
 /* Top of a reading text: the language the text is read in (remembered per subject) and Read aloud.
    Selecting text and choosing "Read it" in the selection menu uses the same language. */
 export function ReadAloudBar({ subjectId, text }: { subjectId: string; text: string }) {
-  const [lang, setLang] = useState("auto");
   const [voice, setVoice] = useState("");
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [speaking, setSpeaking] = useState(false);
@@ -65,13 +62,10 @@ export function ReadAloudBar({ subjectId, text }: { subjectId: string; text: str
   const supported = canSpeak();
 
   useEffect(() => {
-    let saved = "auto";
-    try { saved = localStorage.getItem(langKey(subjectId)) || "auto"; } catch { /* ignore */ }
-    setLang(saved);
     try { setVoice(localStorage.getItem(voiceKey(subjectId)) || ""); } catch { setVoice(""); }
     return () => { stopSpeaking(); };
   }, [subjectId]);
-  useEffect(() => { setReader({ lang, guess, voice }); return () => setReader({ lang: "auto", guess: null, voice: "" }); }, [lang, guess, voice]);
+  useEffect(() => { setReader({ lang: "auto", guess, voice }); return () => setReader({ lang: "auto", guess: null, voice: "" }); }, [guess, voice]);
   useEffect(() => {
     if (!supported) return;
     const synth = window.speechSynthesis;
@@ -87,20 +81,15 @@ export function ReadAloudBar({ subjectId, text }: { subjectId: string; text: str
       if (!g.has(k)) g.set(k, []);
       g.get(k)!.push(v);
     });
-    const first = (lang !== "auto" ? lang : guess || "").toLowerCase();
+    const first = (guess || "").toLowerCase();
     return [...g.entries()].sort((a, b) => (a[0] === first ? -1 : b[0] === first ? 1 : langName(a[0]).localeCompare(langName(b[0]))));
-  }, [voices, lang, guess]);
+  }, [voices, guess]);
   function changeVoice(uri: string) {
     setVoice(uri);
     stopSpeaking(); setSpeaking(false);
     try { localStorage.setItem(voiceKey(subjectId), uri); } catch { /* ignore */ }
   }
 
-  function change(next: string) {
-    setLang(next);
-    stopSpeaking(); setSpeaking(false);
-    try { localStorage.setItem(langKey(subjectId), next); } catch { /* ignore */ }
-  }
   function toggle() {
     if (speaking) { stopSpeaking(); setSpeaking(false); return; }
     setSpeaking(true);
@@ -109,15 +98,9 @@ export function ReadAloudBar({ subjectId, text }: { subjectId: string; text: str
 
   return (
     <div className="read-bar">
-      <label>Language
-        <select className="select" value={lang} onChange={e => change(e.target.value)}>
-          <option value="auto">Auto{guess ? ` (${langName(guess)})` : ""}</option>
-          {LANGS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}
-        </select>
-      </label>
       <label>Voice
         <select className="select" disabled={!supported} value={voice} onChange={e => changeVoice(e.target.value)}>
-          <option value="">Automatic</option>
+          <option value="">Automatic{guess ? ` (${langName(guess)})` : ""}</option>
           {grouped.map(([code, list]) => (
             <optgroup key={code} label={langName(code)}>
               {list.map(v => <option key={v.voiceURI} value={v.voiceURI}>{v.name} ({v.lang})</option>)}
