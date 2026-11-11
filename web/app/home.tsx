@@ -18,6 +18,7 @@ import { Menu as MenuIcon, Keyboard, ArrowRight, BookOpen, ChevronDown, Layers, 
 import dynamic from "next/dynamic";
 import type { Subject, Node, Test, Card, Phrase, Reading, User, Page } from "./types";
 import SubjectPicker from "./subject-picker";
+import { buildPrompt, type PromptContext } from "./prompts";
 import { seededOrder, pathOutline } from "./path-utils";
 const TestCenter = dynamic(() => import("./test-center"), { ssr: false }) as unknown as typeof TestCenterType;
 const VocabPractice = dynamic(() => import("./vocab-practice"), { ssr: false });
@@ -128,44 +129,8 @@ async function deleteReading(rd:{id:string;title:string}){if(!window.confirm(`De
  async function exportBundle(){try{let data=await api(`/subjects/${subject}/export`);let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));a.download=`${(current?.title||"subject").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")||"subject"}-learnify.json`;a.click();URL.revokeObjectURL(a.href)}catch(e:any){message(e.message)}}
  function exportQuestions(name:string,items:Test[]){let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify({questions:items.map(q=>({question:q.prompt,options:q.options,answer:q.correct_index,explanation:q.explanation||undefined,tags:q.tags?.length?q.tags:undefined}))},null,2)],{type:"application/json"}));a.download=`${name}-tests.json`;a.click();URL.revokeObjectURL(a.href)}
  async function copyPrompt(kind:string,fromImport=false){
-  let subjectName=current?.title||"the learner's subject";
-  let level=current?.target_level||"the right level";
-  let q={question:"Question text",options:["Option A","Option B","Option C","Option D"],answer:0,explanation:"Why the answer is correct and why the others are wrong."};
-  let schema:any;
-  let context="";
-  if(kind==="initial"){
-   schema={title:"Course title",description:"One-sentence summary of the course",level:"Target level",
-    lessons:[{title:"Main step 1",level:"Level",content:"# Lesson in Markdown\n\nExplanations, examples, tables where useful.",questions:[q],
-     lessons:[{title:"Sub-topic 1.1",content:"Markdown lesson",questions:[q]}]}],
-    questions:[],vocabulary:[{term:"Key term",definition:"Clear meaning",part_of_speech:"noun (if it applies)",example:"Example in context",tags:["topic"]}],
-    readings:[{title:"Reading title",level:"Level",content:"Passage in Markdown",questions:[q]}]};
-   context="Create a complete course for the subject and goals described at the end of this prompt. It can be any subject. Build a roadmap of 4-8 main steps in learning order; put 2-6 sub-topics inside each main step's \"lessons\" list (sub-topics may have their own \"lessons\"). Every lesson needs substantial Markdown content with explanations and examples, plus 2-5 multiple-choice questions on that lesson. Add vocabulary cards for key terms and 1-3 reading passages with comprehension questions when they suit the subject; leave a list empty if it does not apply.";
-  }else if(kind==="roadmap"){
-   schema={lessons:[{title:"Main step",content:"# Markdown lesson",questions:[q],lessons:[{title:"Sub-topic",content:"Markdown lesson",questions:[q]}]}]};
-   context="Create new lessons for "+subjectName+" at "+level+": 3-8 main steps in learning order, each with 2-6 sub-topics nested in its \"lessons\" list. Every lesson needs substantial Markdown content and 2-5 multiple-choice questions.";
-  }else if(kind==="vocab"){
-   schema={vocabulary:[{term:"Word or phrase",definition:"Clear meaning",part_of_speech:"Part of speech",example:"Natural example sentence",tags:["topic"]}]};
-   context="Prepare useful vocabulary for "+subjectName+" at "+level+". Topic: "+(vocabTopic==="All words"?"choose a useful topic":vocabTopic)+".";
-  }else if(kind==="dictation"){
-   schema={phrases:[{answer:"One complete natural phrase or sentence in the language being learned (spoken aloud and typed by the learner)",translation:"Its translation into the learner's own language (shown on screen)",tags:["topic"]}]};
-   context="Prepare 30-60 phrases for DICTATION practice for "+subjectName+" at "+level+". Each item's \"answer\" is ONE complete natural phrase or sentence of 3-12 words with correct spelling and punctuation, so use everyday spoken language and write numbers as words. Each item's \"translation\" is its translation. Put a short topic in \"tags\". Use only the keys answer, translation and tags.";
-  }else if(kind==="reading"){
-   schema={readings:[{title:"Passage title",level:current?.target_level||"Level",content:"Passage in Markdown",questions:[q]}]};
-   context="Create engaging reading passages (1-3, each 150-400 words) about the subject \""+subjectName+"\" at "+level+", each with 3-5 comprehension questions. Stay on this subject and use the topic or source text given at the end of this prompt."+(readings.length?"\nTexts that already exist (write different ones, do not repeat these titles): "+readings.map(x=>x.title).join("; ")+".":"");
-  }else{
-   let lesson=(page==="lesson"||page==="lesson-test")?activeNode:null;
-   schema={questions:[{...q,tags:["topic"]}]};
-   context="Create 5-10 multiple-choice questions for "+subjectName+(lesson?", lesson \""+lesson.title+"\"":"")+"."+(lesson?"\nLESSON MATERIAL (use only this as the source; do not test facts that are not in it):\n"+(nodeBodies[lesson.id]??lesson.content_markdown??""):"");
-  }
-  let fence="`".repeat(3);
-  let prompt="Act as an expert educator and learning-material designer. "+context
-   +"\n\nOUTPUT FORMAT (important): reply with the finished JSON ready to copy, in ONE code block that starts with "+fence+"json and ends with "+fence+", and put nothing else in your reply: no introduction, no explanation, no follow-up questions. If you can create files, also attach the same JSON as a downloadable file named learnify.json."
-   +"\n\nThe JSON must match this example:\n"+JSON.stringify(schema,null,2)
-   +"\n\nRules:\n- Valid JSON only: double-quoted keys and strings, no comments, no trailing commas.\n- Do not add any \"id\" fields; structure comes from nesting and order.\n- \"answer\" is the zero-based index of the correct option (0 = first option). Each question has 2-6 options and exactly one correct answer.\n- Write lesson and reading content in Markdown. Inside JSON strings write line breaks as \\n and escape double quotes as \\\". Do not use triple backticks inside the content (use indented or inline code instead) so the code block stays intact.\n- Give a clear explanation for every answer.\n- Keep it complete: if the course is too long for one reply, return fewer lessons per reply instead of cutting the JSON off.";
-  if(kind==="initial")prompt+="\n\nYOUR SUBJECT AND LEARNING GOALS:\n[Describe what you want to learn, your current level, goals, and topics to include.]";
-  if(kind==="reading")prompt+="\n\nTOPIC, SOURCE TEXT, OR REQUEST FOR THE READING:\n[Write the topic or situation you want, paste a text to turn into a reading, or delete this line to let the AI choose a topic within the subject.]";
-  if(kind==="dictation")prompt+="\n\nTOPIC, SITUATION, OR SOURCE TEXT FOR THE PHRASES:\n[Write a topic (for example ordering food), paste a text to turn into sentences, or delete this line to let the AI choose.]";
-  if(kind==="vocab")prompt+="\n\nUSER TOPIC, SOURCE MATERIAL, OR REQUIRED WORDS:\n[Write a topic, paste source content, or list the exact vocabulary you want included here.]";
+  let ctx:PromptContext={subjectName:current?.title||"the learner's subject",level:current?.target_level||"the right level",targetLevel:current?.target_level,vocabTopic,readingTitles:readings.map(x=>x.title),lesson:(page==="lesson"||page==="lesson-test")&&activeNode?{title:activeNode.title,content:nodeBodies[activeNode.id]??activeNode.content_markdown??""}:null};
+  let prompt=buildPrompt(kind,ctx);
   setPromptForImport("");try{await navigator.clipboard.writeText(prompt);message("Prompt copied. Edit its request section before using it.")}catch{setPromptForImport(prompt);message("Clipboard access is blocked. Copy the prompt text shown here.")}
  } const defaultPromptKind=subjects.length===0?"initial":page==="lesson"||page==="lesson-test"||page==="tests"||page==="mistakes"?"test":page==="vocabulary"||page==="vocabulary-practice"?"vocab":page==="dictation"?"dictation":page==="readings"?"reading":"roadmap";
  async function chooseAnswer(q:Test,key:string,i:number){if(answers[key]!==undefined)return;setAnswers(a=>({...a,[key]:i}));try{await api(`${subjectPath()}/tests/${encodeURIComponent(q.id)}/attempts`,json("POST",{selected_index:i}));await refresh()}catch(e:any){setAnswers(a=>{let n={...a};delete n[key];return n});message(e.message)}}
