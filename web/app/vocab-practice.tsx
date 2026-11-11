@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, RotateCcw, Settings, Volume2, X } from "lucide-react";
 import { guessLang, langName, pickVoice } from "@/lib/speech";
+import TypeBlocks, { useKeyboardInset, type Solved } from "./type-blocks";
 
 /*
  * Full-screen vocabulary practice.
@@ -54,16 +55,6 @@ function shuffled<T>(list: T[]): T[] {
   return a;
 }
 const norm = (s: string) => s.normalize("NFC").toLowerCase().replace(/\s+/g, " ").trim();
-const plain = (s: string) => norm(s).normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[.!?,;:]+$/, "");
-
-function judge(input: string, term: string): Verdict {
-  const a = norm(input).replace(/[.!?,;:]+$/, "");
-  if (!a) return null;
-  const variants = term.split(/[/;]/).map(v => v.trim()).filter(Boolean);
-  if (variants.some(v => norm(v).replace(/[.!?,;:]+$/, "") === a)) return "right";
-  if (variants.some(v => plain(v) === plain(a))) return "accent";
-  return "wrong";
-}
 
 type Props = {
   title: string; subjectId: string; topicCards: VCard[]; allCards: VCard[];
@@ -156,7 +147,6 @@ export default function VocabPractice({ title, subjectId, topicCards, allCards, 
   const [item, setItem] = useState<Prepared | null>(() => (queue[0] ? prepare(queue[0]) : null));
   const [answered, setAnswered] = useState(false);
   const [picked, setPicked] = useState<number | null>(null);
-  const [typed, setTyped] = useState("");
   const [verdict, setVerdict] = useState<Verdict>(null);
   const [stats, setStats] = useState({ right: 0, wrong: 0 });
   const [missed, setMissed] = useState<VCard[]>([]);
@@ -164,8 +154,9 @@ export default function VocabPractice({ title, subjectId, topicCards, allCards, 
   const [saveError, setSaveError] = useState(false);
   const repeats = useRef<Record<string, number>>({});
   const root = useRef<HTMLDivElement>(null);
+  useKeyboardInset(root);
 
-  const resetCard = () => { setAnswered(false); setPicked(null); setTyped(""); setVerdict(null); };
+  const resetCard = () => { setAnswered(false); setPicked(null); setVerdict(null); };
   const commit = (rating: number, card: VCard): VCard[] => {
     onReview(card.id, rating).catch(() => setSaveError(true));
     const good = rating >= 2;
@@ -198,12 +189,11 @@ export default function VocabPractice({ title, subjectId, topicCards, allCards, 
     commit(ok ? 2 : 0, item.card);
     if (item.mode === "choose-word") speak(item.card);
   };
-  const check = () => {
+  const solved = (r: Solved) => {
     if (!item || answered) return;
-    const v = judge(typed, item.card.term);
-    if (!v) return;
+    const v: Verdict = r.accent ? "accent" : "right";
     setVerdict(v); setAnswered(true);
-    commit(v === "right" ? 2 : v === "accent" ? 1 : 0, item.card);
+    commit(r.hints > 0 ? 0 : r.accent || r.errors > 0 ? 1 : 2, item.card);
     speak(item.card);
   };
   const flip = () => { if (item?.mode === "flashcard" && !answered) setAnswered(true); };
@@ -266,7 +256,6 @@ export default function VocabPractice({ title, subjectId, topicCards, allCards, 
   const termVisible = !!item && (mode === "flashcard" || mode === "choose-meaning" || answered);
   const canSpeak = prefs.sound && !!card && (!!synth || !!card.audio_url);
   const isChoice = mode === "choose-word" || mode === "choose-meaning";
-  const longOptions = isChoice && (mode === "choose-meaning" || (item?.options || []).some(o => o.text.length > 26));
   const promptText = !card ? "" : mode === "choose-word" || mode === "type" ? card.definition : card.term;
   const label = mode === "choose-word" || mode === "type" ? "Meaning" : "Word";
   const isLast = i + 1 >= total;
@@ -325,7 +314,7 @@ export default function VocabPractice({ title, subjectId, topicCards, allCards, 
               {mode === "flashcard" && !answered && <div className="vp-sub">{card.part_of_speech ? `${card.part_of_speech} · ` : ""}Tap to flip</div>}
               {mode === "choose-meaning" && card.part_of_speech && !answered && <div className="vp-sub">{card.part_of_speech}</div>}
               {mode === "choose-word" && !answered && <div className="vp-sub">Which word matches?</div>}
-              {mode === "type" && !answered && <div className="vp-sub">Type the word</div>}
+              {mode === "type" && !answered && <TypeBlocks key={`${card.id}-${i}`} answer={card.term} sound={prefs.sound} onSolved={solved} />}
               {verdict && (
                 <div className={`vp-verdict ${verdict}`}>
                   {verdict === "right" ? <><Check size={18} />Correct</> : verdict === "accent" ? "Almost: mind the accents" : "Not quite"}
@@ -351,7 +340,7 @@ export default function VocabPractice({ title, subjectId, topicCards, allCards, 
             )}
             {isChoice && item && (
               <>
-                <div className={`vp-options ${longOptions ? "one" : ""}`}>
+                <div className="vp-options one">
                   {item.options.map((o, idx) => (
                     <button type="button" key={idx} disabled={answered && !o.correct && picked !== idx}
                       className={`vp-option ${answered ? (o.correct ? "correct" : picked === idx ? "wrong" : "dim") : ""}`}
@@ -362,13 +351,6 @@ export default function VocabPractice({ title, subjectId, topicCards, allCards, 
                 </div>
                 {answered && <button type="button" className="btn primary vp-big" onClick={() => advance()} autoFocus>{isLast ? "Finish" : "Next"}</button>}
               </>
-            )}
-            {mode === "type" && !answered && (
-              <form className="vp-type" onSubmit={e => { e.preventDefault(); check(); }}>
-                <input className="input" value={typed} onChange={e => setTyped(e.target.value)} placeholder="Type the word" aria-label="Your answer"
-                  autoFocus autoCapitalize="off" autoCorrect="off" spellCheck={false} />
-                <button type="submit" className="btn primary" disabled={!typed.trim()}>Check</button>
-              </form>
             )}
             {mode === "type" && answered && <button type="button" className="btn primary vp-big" onClick={() => advance()} autoFocus>{isLast ? "Finish" : "Next"}</button>}
           </footer>

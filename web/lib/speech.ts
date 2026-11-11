@@ -57,7 +57,7 @@ export function speak(text: string, lang: string | null, onEnd?: () => void, rat
   if (!canSpeak() || !text.trim()) { onEnd?.(); return; }
   const synth = window.speechSynthesis;
   synth.cancel();
-  const voice = pickVoice(synth.getVoices(), lang);
+  const voice = pickVoice(synth.getVoices(), lang, reader.voice || undefined);
   const list = chunks(text);
   list.forEach((piece, i) => {
     const u = new SpeechSynthesisUtterance(piece);
@@ -71,8 +71,8 @@ export function speak(text: string, lang: string | null, onEnd?: () => void, rat
 }
 
 /* The reading room's language choice, shared with the selection menu ("Read it"). */
-const reader = { lang: "auto", guess: null as string | null };
-export function setReader(next: { lang?: string; guess?: string | null }) { Object.assign(reader, next); }
+const reader = { lang: "auto", guess: null as string | null, voice: "" };
+export function setReader(next: { lang?: string; guess?: string | null; voice?: string }) { Object.assign(reader, next); }
 export const readerLang = () => (reader.lang !== "auto" ? reader.lang : reader.guess);
 // Works on any page: the reading room's language choice wins, otherwise guess from the selection,
 // then from the text on the page (a single word is too short to guess from).
