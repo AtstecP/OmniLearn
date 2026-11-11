@@ -4,10 +4,11 @@ from typing import Any
 from uuid import UUID, uuid4
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy import and_, delete, desc, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 from .config import DEFAULT_JWT_SECRET, settings
 from .database import get_db
 from .gzip_body import GzipRequestMiddleware
@@ -23,6 +24,7 @@ if settings.cookie_secure and (settings.jwt_secret == DEFAULT_JWT_SECRET or len(
 # The schema is managed by Alembic (`alembic upgrade head`); the API never creates or alters tables.
 app = FastAPI(title="Learnify API", version="3.0.0", description="Schema-driven learning engine API")
 app.add_middleware(GzipRequestMiddleware)
+app.add_middleware(GZipMiddleware, minimum_size=1024)  # compress big JSON responses
 app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -81,7 +83,10 @@ def commit_or_422(db: Session):
         raise HTTPException(422, f"The data breaks a database rule ({constraint or 'integrity check'}).")
 
 
-def node_json(node: m.RoadmapNode, test_ids: list[UUID]):
+def node_json(node: m.RoadmapNode, test_ids: list[UUID], lite: bool = False):
+    """lite leaves out the lesson text (it is fetched when a lesson is opened)."""
+    if lite:
+        return {c.name: getattr(node, c.name) for c in node.__table__.columns if c.name != "content_markdown"} | {"test_ids": test_ids}
     return {**dump(node), "test_ids": test_ids}
 
 
@@ -179,9 +184,11 @@ def delete_subject(subject_id: UUID, payload: SubjectDeleteIn, db: Session = Dep
     db.commit()
 
 
-def roadmap_rows(db: Session, subject_id: UUID):
-    return db.scalars(select(m.RoadmapNode).where(m.RoadmapNode.subject_id == subject_id)
-                      .order_by(m.RoadmapNode.order_index, m.RoadmapNode.created_at)).all()
+def roadmap_rows(db: Session, subject_id: UUID, lite: bool = False):
+    stmt = select(m.RoadmapNode).where(m.RoadmapNode.subject_id == subject_id).order_by(m.RoadmapNode.order_index, m.RoadmapNode.created_at)
+    if lite:
+        stmt = stmt.options(defer(m.RoadmapNode.content_markdown))
+    return db.scalars(stmt).all()
 
 
 def test_rows(db: Session, subject_id: UUID):
@@ -208,13 +215,13 @@ def tree_order(nodes):
     return out + [n for n in nodes if n.id not in seen]
 
 
-def roadmap_json(nodes, tests):
+def roadmap_json(nodes, tests, lite: bool = False):
     nodes = tree_order(nodes)
     linked = defaultdict(list)
     for t in tests:
         if t.node_id:
             linked[t.node_id].append(t.id)
-    return [node_json(n, linked[n.id]) for n in nodes]
+    return [node_json(n, linked[n.id], lite) for n in nodes]
 
 
 def progress_map(db: Session, subject_id: UUID, user: m.User):
@@ -240,11 +247,20 @@ def vocab_rows(db: Session, subject_id: UUID, user: m.User, due_only: bool = Fal
     return out
 
 
-def reading_rows(db: Session, subject_id: UUID):
+def reading_summaries(db: Session, subject_id: UUID):
+    """Readings without their text and questions (those load when a text is opened)."""
+    count = select(func.count(m.ReadingQuestion.id)).where(m.ReadingQuestion.reading_id == m.ReadingPassage.id).scalar_subquery()
+    rows = db.execute(select(m.ReadingPassage.id, m.ReadingPassage.subject_id, m.ReadingPassage.title, m.ReadingPassage.cefr_level, m.ReadingPassage.audio_url, count)
+                      .where(m.ReadingPassage.subject_id == subject_id)
+                      .order_by(m.ReadingPassage.order_index, m.ReadingPassage.created_at)).all()
+    return [{"id": i, "subject_id": sid, "title": t, "level": lv, "audio_url": au, "question_count": qc} for i, sid, t, lv, au, qc in rows]
+
+
+def reading_rows(db: Session, subject_id: UUID, reading_id: UUID | None = None):
     rows = db.execute(
         select(m.ReadingPassage, m.ReadingQuestion)
         .outerjoin(m.ReadingQuestion, m.ReadingQuestion.reading_id == m.ReadingPassage.id)
-        .where(m.ReadingPassage.subject_id == subject_id)
+        .where(m.ReadingPassage.subject_id == subject_id, *([m.ReadingPassage.id == reading_id] if reading_id else []))
         .order_by(m.ReadingPassage.order_index, m.ReadingPassage.created_at, m.ReadingQuestion.order_index)
     ).all()
     grouped = {}
@@ -311,10 +327,10 @@ def subject_workspace(subject_id: UUID, db: Session = Depends(get_db), user: m.U
     """Everything the UI needs for one subject in 7 queries; dashboard numbers are derived from the lists."""
     require_subject(db, subject_id, user)
     tests = test_rows(db, subject_id)
-    roadmap = roadmap_json(roadmap_rows(db, subject_id), tests)
+    roadmap = roadmap_json(roadmap_rows(db, subject_id, lite=True), tests, lite=True)
     progress = progress_map(db, subject_id, user)
     cards = vocab_rows(db, subject_id, user)
-    readings = reading_rows(db, subject_id)
+    readings = reading_summaries(db, subject_id)
     mistakes = mistake_rows(db, subject_id, user)
     phrases = phrase_rows(db, subject_id)
     alive = {"lesson": {str(n["id"]) for n in roadmap}, "question": {str(t.id) for t in tests}, "reading": {str(r["id"]) for r in readings}}
@@ -334,6 +350,22 @@ def dashboard(subject_id: UUID, db: Session = Depends(get_db), user: m.User = De
 def get_roadmap(subject_id: UUID, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
     require_subject(db, subject_id, user)
     return roadmap_json(roadmap_rows(db, subject_id), test_rows(db, subject_id))
+
+
+@app.get("/subjects/{subject_id}/roadmap/search")
+def search_roadmap(subject_id: UUID, q: str = Query(min_length=1, max_length=200), db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+    """Ids of lessons whose title, level or text contains q (the workspace carries no lesson text)."""
+    require_subject(db, subject_id, user)
+    like = "%" + q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    rows = db.scalars(select(m.RoadmapNode.id).where(m.RoadmapNode.subject_id == subject_id, (m.RoadmapNode.title.ilike(like, escape="\\")) | (m.RoadmapNode.level.ilike(like, escape="\\")) | (m.RoadmapNode.content_markdown.ilike(like, escape="\\"))).limit(500)).all()
+    return [str(i) for i in rows]
+
+
+@app.get("/subjects/{subject_id}/nodes/{node_id}")
+def get_node(subject_id: UUID, node_id: UUID, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+    """One lesson with its text."""
+    obj = require_item(db, m.RoadmapNode, subject_id, node_id, user, "Lesson")
+    return node_json(obj, list(db.scalars(select(m.TestQuestion.id).where(m.TestQuestion.node_id == node_id).order_by(m.TestQuestion.order_index))))
 
 
 @app.get("/subjects/{subject_id}/progress")
@@ -357,7 +389,7 @@ def same_parent(column, parent: UUID | None):
 def update_roadmap_layout(subject_id: UUID, payload: RoadmapLayoutIn, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
     """Move and reorder lessons in one request (used by the map editor)."""
     require_subject(db, subject_id, user)
-    nodes = {n.id: n for n in roadmap_rows(db, subject_id)}
+    nodes = {n.id: n for n in roadmap_rows(db, subject_id, lite=True)}
     for item in payload.nodes:
         if item.id not in nodes:
             raise HTTPException(404, f"Lesson not found: {item.id}")
@@ -377,7 +409,7 @@ def update_roadmap_layout(subject_id: UUID, payload: RoadmapLayoutIn, db: Sessio
         nodes[item.id].parent_node_id = item.parent_node_id
         nodes[item.id].order_index = item.order_index
     commit_or_422(db)
-    return roadmap_json(roadmap_rows(db, subject_id), test_rows(db, subject_id))
+    return roadmap_json(roadmap_rows(db, subject_id, lite=True), test_rows(db, subject_id), lite=True)
 
 
 @app.post("/subjects/{subject_id}/nodes", status_code=201)
@@ -397,7 +429,9 @@ def create_node(subject_id: UUID, payload: NodeCreate, db: Session = Depends(get
 @app.put("/subjects/{subject_id}/nodes/{node_id}")
 def update_node(subject_id: UUID, node_id: UUID, payload: NodeUpdate, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
     obj = require_item(db, m.RoadmapNode, subject_id, node_id, user, "Lesson")
-    obj.title, obj.level, obj.content_markdown = payload.title, payload.level, payload.content_markdown
+    obj.title, obj.level = payload.title, payload.level
+    if payload.content_markdown is not None:  # omitted = keep the lesson text (the workspace does not carry it)
+        obj.content_markdown = payload.content_markdown
     commit_or_422(db); db.refresh(obj)
     return node_json(obj, list(db.scalars(select(m.TestQuestion.id).where(m.TestQuestion.node_id == node_id).order_by(m.TestQuestion.order_index))))
 
@@ -566,6 +600,13 @@ def review_vocab(subject_id: UUID, card_id: UUID, payload: ReviewIn, db: Session
 def list_readings(subject_id: UUID, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
     require_subject(db, subject_id, user)
     return reading_rows(db, subject_id)
+
+
+@app.get("/subjects/{subject_id}/readings/{reading_id}")
+def get_reading(subject_id: UUID, reading_id: UUID, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+    """One reading text with its questions."""
+    require_item(db, m.ReadingPassage, subject_id, reading_id, user, "Reading")
+    return next(r for r in reading_rows(db, subject_id, reading_id))
 
 
 @app.put("/subjects/{subject_id}/readings/{reading_id}")

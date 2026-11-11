@@ -92,7 +92,7 @@ class NodeCreate(BaseModel):
 class NodeUpdate(BaseModel):
     """Edits a lesson's text. Moving and reordering go through the layout endpoint."""
     title: Title
-    content_markdown: str = Field(default="", max_length=200_000)
+    content_markdown: str | None = Field(default=None, max_length=200_000)
     level: str | None = Field(default=None, max_length=32)
 
 
