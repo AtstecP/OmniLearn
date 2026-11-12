@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, RotateCcw, Settings, Volume2, X } from "lucide-react";
-import { guessLang, langName, pickVoice } from "@/lib/speech";
+import { guessLang, langName, pickVoice, setReader } from "@/lib/speech";
 import TypeBlocks, { useKeyboardInset, type Solved } from "./type-blocks";
 
 /*
@@ -79,6 +79,9 @@ export default function VocabPractice({ title, subjectId, topicCards, allCards, 
   }, [synth]);
   const guessed = useMemo(() => guessLang(allCards.slice(0, 300).map(c => `${c.term} ${c.example_sentence || ""}`).join(" ")), [allCards]);
   const voice = pickVoice(voices, guessed, prefs.voices[subjectId]);
+  // Selecting text on this screen and choosing "Read it" speaks with the voice chosen in these settings.
+  const chosenVoice = prefs.voices[subjectId] || "";
+  useEffect(() => { setReader({ lang: "auto", guess: guessed, voice: chosenVoice }); return () => setReader({ lang: "auto", guess: null, voice: "" }); }, [guessed, chosenVoice]);
   const voiceRef = useRef(voice); voiceRef.current = voice;
   const guessedRef = useRef(guessed); guessedRef.current = guessed;
   const audioRef = useRef<HTMLAudioElement | null>(null);
