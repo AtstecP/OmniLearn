@@ -25,6 +25,7 @@ OmniLearn/
 ├── CLAUDE.md                   # This guide
 ├── README.md                   # User-facing local and deployment setup
 ├── docker-compose.yml          # Local PostgreSQL, API, and web services
+├── .github/workflows/ci.yml    # CI: API tests (pytest + PostgreSQL) and web type check on every push
 ├── .env.example                # Local environment template; no production keys
 ├── api/
 │   ├── app/
@@ -39,6 +40,8 @@ OmniLearn/
 │   ├── migrations/versions/    # 0001 baseline, 0002 subject-scoped IDs, 0003 UUID keys + DB checks, 0004 activity days, 0005 favorites, 0006 dictation phrases
 │   ├── index.py                # Vercel FastAPI entry point
 │   ├── requirements.txt
+│   ├── requirements-dev.txt    # + pytest, httpx for the tests
+│   ├── tests/                  # pytest API tests (need TEST_DATABASE_URL)
 │   └── Dockerfile
 ├── web/
 │   ├── app/home.tsx            # Main client UI shell (state, pages); helpers live in types.ts, path-utils.ts, subject-picker.tsx, home-modal.tsx (import/create dialogs), practice-question.tsx, settings-cards.tsx, auth-screen.tsx; heavy screens (test center, vocab practice, exam runner, dictation, mistakes, modal, auth, settings cards) load on demand through next/dynamic
@@ -257,7 +260,7 @@ Typical workflow: open **Import**, pick **Add to** and a prompt type, copy the A
 - The workspace endpoint runs about 7 queries and derives its dashboard numbers from the loaded lists. The SQLAlchemy pool allows 5+5 connections because the browser sends requests in parallel.
 - `docker compose up` without `--build` reuses old images. After pulling or editing code, always run `docker compose up --build`.
 - The initial AI prompt is subject-agnostic and asks for 4-8 main steps with nested sub-topics, questions per lesson, and optional vocabulary and readings.
-- There is no automated test suite yet.
+- Automated tests: `api/tests/` (pytest, 28 tests: accounts, import/export round trip, bad import saves nothing, gzip in and out, lean workspace and lazy lesson/reading text, topic replace for vocabulary and phrases, bulk delete, mistakes, and that another account gets 404 on every subject route). They need a real PostgreSQL in `TEST_DATABASE_URL` (a throwaway database: the suite refuses hosted hosts such as neon.tech, creates accounts/subjects and never cleans up) and run the Alembic migrations first. Locally: start `postgres:16-alpine` (for example `docker run -d --rm -p 5433:5432 -e POSTGRES_PASSWORD=t -e POSTGRES_DB=t postgres:16-alpine`), `pip install -r api/requirements-dev.txt`, then from `api/`: `TEST_DATABASE_URL=postgresql+psycopg://postgres:t@localhost:5433/t pytest`. `.github/workflows/ci.yml` runs them (plus `tsc --noEmit` for the web app) on every push and pull request. Add a test with every new route, especially an ownership check (other account gets 404). There are no browser/UI tests; the web app is only type-checked.
 - Next's Docker build uses standalone output. A native Windows `npm run build` previously completed compilation, type-checking, and page generation, then failed while copying `.next/standalone` traced files with `EPERM`. This was a Windows filesystem limitation observed in that environment; if it recurs in Docker, inspect the Docker build output and permissions separately.
 - Do not remove the Compose volume as a routine troubleshooting step; it contains the local database.
 
