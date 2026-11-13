@@ -129,13 +129,14 @@ export default function Dictation({ title, subjectId, cards, onClose }: { title:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, index, order]);
 
-  // A finished phrase moves on by itself after a moment (Enter skips the wait): there are no Next/Back buttons.
+  // A finished phrase moves on by itself after a moment (Enter skips the wait). When a hint was used the
+  // learner gets a Next button instead, so there is time to read the sentence.
   useEffect(() => {
-    if (phase !== "play" || !done) return;
+    if (phase !== "play" || !done || hints > 0) return;
     const t = window.setTimeout(() => next(), 1100);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [done, phase, index]);
+  }, [done, phase, index, hints]);
 
   // Any typing key anywhere on the screen lands in the blocks, even when nothing is focused
   // (the field is invisible). The keys are applied directly so the first letter is never lost.
@@ -334,6 +335,11 @@ export default function Dictation({ title, subjectId, cards, onClose }: { title:
           {done ? <span className="ok"><Check size={16} /> Correct{errors || hints ? ` (${errors} ${errors === 1 ? "mistake" : "mistakes"}, ${hints} ${hints === 1 ? "hint" : "hints"})` : "!"}</span>
             : checked ? <span className="bad">Not quite: fix the red words.</span> : null}
         </div>
+        {done && hints > 0 && (
+          <div className="dict-actions">
+            <button type="button" className="btn primary" onClick={next} autoFocus><ArrowRight size={16} />{index + 1 >= order.length ? "Finish" : "Next"}</button>
+          </div>
+        )}
       </div>
     );
   }
