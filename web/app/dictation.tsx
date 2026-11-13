@@ -16,12 +16,12 @@ import { sfx } from "@/lib/sounds";
  */
 
 export type DCard = { id: string; term: string; definition: string; part_of_speech?: string | null; audio_url?: string | null };
-type Settings = { sound: boolean; autoplay: boolean; shuffle: boolean; accents: boolean; lang: string };
+type Settings = { sound: boolean; autoplay: boolean; autoNext: boolean; shuffle: boolean; accents: boolean; lang: string };
 type Result = { errors: number; hints: number };
 type Status = "pending" | "typing" | "typing-bad" | "right" | "wrong";
 
 const STORE = "learnify.dictation.settings";
-const DEFAULTS: Settings = { sound: true, autoplay: true, shuffle: false, accents: false, lang: "auto" };
+const DEFAULTS: Settings = { sound: true, autoplay: true, autoNext: true, shuffle: false, accents: false, lang: "auto" };
 const LANGS = ["en", "fr", "es", "de", "it", "pt", "nl", "sv", "pl", "tr", "ru", "uk", "ar", "he", "hi", "th", "zh", "ja", "ko", "el"];
 
 function load(): Settings {
@@ -129,14 +129,14 @@ export default function Dictation({ title, subjectId, cards, onClose }: { title:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, index, order]);
 
-  // A finished phrase moves on by itself after a moment (Enter skips the wait). When a hint was used the
-  // learner gets a Next button instead, so there is time to read the sentence.
+  // With "Move on automatically" a finished phrase moves on by itself after a moment (Enter skips the wait);
+  // otherwise a green Next button appears next to Hint and the learner moves on when ready.
   useEffect(() => {
-    if (phase !== "play" || !done || hints > 0) return;
+    if (phase !== "play" || !done || !settings.autoNext) return;
     const t = window.setTimeout(() => next(), 1100);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [done, phase, index, hints]);
+  }, [done, phase, index, settings.autoNext]);
 
   // Any typing key anywhere on the screen lands in the blocks, even when nothing is focused
   // (the field is invisible). The keys are applied directly so the first letter is never lost.
@@ -245,6 +245,7 @@ export default function Dictation({ title, subjectId, cards, onClose }: { title:
   const settingsPanel = (
     <div className="dict-settings" role="group" aria-label="Dictation settings">
       <label><input type="checkbox" checked={settings.sound} onChange={e => update({ sound: e.target.checked })} /> Sound effects</label>
+      <label><input type="checkbox" checked={settings.autoNext} onChange={e => update({ autoNext: e.target.checked })} /> Move to the next phrase automatically (off: a green Next button appears)</label>
       <label><input type="checkbox" checked={settings.autoplay} onChange={e => update({ autoplay: e.target.checked })} /> Read each sentence aloud automatically</label>
       <label><input type="checkbox" checked={settings.accents} onChange={e => update({ accents: e.target.checked })} /> Ignore accents (é = e)</label>
       <label><input type="checkbox" checked={settings.shuffle} onChange={e => update({ shuffle: e.target.checked })} /> Random order (next time you start)</label>
@@ -322,6 +323,9 @@ export default function Dictation({ title, subjectId, cards, onClose }: { title:
           <button type="button" className="vp-speak small" onClick={() => { sfx.unlock(); play(); focusInput(); }} aria-label="Play the sentence" title="Play"><Volume2 size={20} /></button>
           <button type="button" className="vp-speak small" onClick={() => { sfx.unlock(); play(true); focusInput(); }} aria-label="Play slowly" title="Play slowly"><Snail size={20} /></button>
           <button type="button" className="vp-speak small" onClick={() => { sfx.unlock(); hint(); focusInput(); }} disabled={done} aria-label="Hint: reveal the next word" title="Hint"><Lightbulb size={20} /></button>
+          {done && !settings.autoNext && (
+            <button type="button" className="vp-speak small dict-next" onClick={next} autoFocus aria-label={index + 1 >= order.length ? "Finish" : "Next phrase"} title={index + 1 >= order.length ? "Finish" : "Next"}><ArrowRight size={20} /></button>
+          )}
         </div>
         {slots}
         <input ref={inputRef} className="dict-input" value={input} readOnly={done}
@@ -335,11 +339,6 @@ export default function Dictation({ title, subjectId, cards, onClose }: { title:
           {done ? <span className="ok"><Check size={16} /> Correct{errors || hints ? ` (${errors} ${errors === 1 ? "mistake" : "mistakes"}, ${hints} ${hints === 1 ? "hint" : "hints"})` : "!"}</span>
             : checked ? <span className="bad">Not quite: fix the red words.</span> : null}
         </div>
-        {done && hints > 0 && (
-          <div className="dict-actions">
-            <button type="button" className="btn primary" onClick={next} autoFocus><ArrowRight size={16} />{index + 1 >= order.length ? "Finish" : "Next"}</button>
-          </div>
-        )}
       </div>
     );
   }

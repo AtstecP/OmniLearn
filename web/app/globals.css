@@ -873,3 +873,5 @@ input[type=checkbox]{width:18px;height:18px;flex:none}
 .vp-card .dict-slots{padding-top:4px}
 
 @media (max-width:767px){.vp-sheet-backdrop{align-items:stretch;background:var(--surface)}.vp-sheet{width:100%;max-height:none;height:100%;border-radius:0;box-shadow:none;align-content:start;padding-top:calc(18px + env(safe-area-inset-top))}}
+
+.dict-next{background:var(--success-soft);color:var(--success)}
