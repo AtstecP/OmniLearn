@@ -87,27 +87,27 @@ export default function VocabPractice({ title, subjectId, topicCards, allCards, 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const unlocked = useRef(false);
 
-  const tts = useCallback((text: string) => {
+  const tts = useCallback((text: string, rate = 0.9) => {
     if (!synth) return;
     const u = new SpeechSynthesisUtterance(text);
     const v = voiceRef.current;
     try { if (v) u.voice = v; } catch { /* ignore */ }
     const lang = v?.lang || guessedRef.current;
     if (lang) u.lang = lang;
-    u.rate = 0.9;
+    u.rate = rate;
     synth.speak(u);
   }, [synth]);
-  const speak = useCallback((card: VCard) => {
+  const speak = useCallback((card: VCard, slow = false) => {
     if (!prefsRef.current.sound) return;
     try { audioRef.current?.pause(); } catch { /* ignore */ }
     synth?.cancel();
     if (card.audio_url) {
       const a = new Audio(card.audio_url);
       audioRef.current = a;
-      a.play().catch(() => tts(card.term));
+      a.play().catch(() => tts(card.term, slow ? 0.55 : 0.9));
       return;
     }
-    tts(card.term);
+    tts(card.term, slow ? 0.55 : 0.9);
   }, [synth, tts]);
   // iOS only allows speech after a tap inside the page; one silent utterance unlocks it.
   const unlock = () => {
@@ -317,7 +317,7 @@ export default function VocabPractice({ title, subjectId, topicCards, allCards, 
               {mode === "flashcard" && !answered && <div className="vp-sub">{card.part_of_speech ? `${card.part_of_speech} · ` : ""}Tap to flip</div>}
               {mode === "choose-meaning" && card.part_of_speech && !answered && <div className="vp-sub">{card.part_of_speech}</div>}
               {mode === "choose-word" && !answered && <div className="vp-sub">Which word matches?</div>}
-              {mode === "type" && !answered && <TypeBlocks key={`${card.id}-${i}`} answer={card.term} sound={prefs.sound} onSolved={solved} />}
+              {mode === "type" && !answered && <TypeBlocks key={`${card.id}-${i}`} answer={card.term} sound={prefs.sound} onSolved={solved} onPlay={canSpeak ? (slow => speak(card, slow)) : undefined} />}
               {verdict && (
                 <div className={`vp-verdict ${verdict}`}>
                   {verdict === "right" ? <><Check size={18} />Correct</> : verdict === "accent" ? "Almost: mind the accents" : "Not quite"}

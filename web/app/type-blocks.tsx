@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Lightbulb } from "lucide-react";
+import { Lightbulb, Snail, Volume2 } from "lucide-react";
 import { sfx } from "@/lib/sounds";
 
 /*
@@ -41,7 +41,7 @@ export function useKeyboardInset(ref: React.RefObject<HTMLElement | null>) {
   }, [ref]);
 }
 
-export default function TypeBlocks({ answer, sound, onSolved }: { answer: string; sound: boolean; onSolved: (r: Solved) => void }) {
+export default function TypeBlocks({ answer, sound, onSolved, onPlay }: { answer: string; sound: boolean; onSolved: (r: Solved) => void; onPlay?: (slow: boolean) => void }) {
   const target = useMemo(() => answer.split(";")[0].trim(), [answer]);
   const cjk = isCjk(target);
   const words = useMemo(() => splitWords(target, cjk), [target, cjk]);
@@ -152,6 +152,8 @@ export default function TypeBlocks({ answer, sound, onSolved }: { answer: string
   return (
     <div className="tb">
       <div className="dict-audio">
+        {onPlay && <button type="button" className="vp-speak small" onClick={() => { sfx.unlock(); onPlay(false); focusInput(); }} disabled={done} aria-label="Play the word" title="Play"><Volume2 size={20} /></button>}
+        {onPlay && <button type="button" className="vp-speak small" onClick={() => { sfx.unlock(); onPlay(true); focusInput(); }} disabled={done} aria-label="Play slowly" title="Play slowly"><Snail size={20} /></button>}
         <button type="button" className="vp-speak small" onClick={() => { sfx.unlock(); hint(); }} disabled={done} aria-label="Hint: reveal the next word" title="Hint"><Lightbulb size={20} /></button>
       </div>
       <div className={`dict-slots ${shake === -1 ? "shake" : ""}`} aria-label="Your answer, word by word" onClick={focusInput}>
