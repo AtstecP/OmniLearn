@@ -99,6 +99,16 @@ async function deleteReading(rd:{id:string;title:string}){if(!window.confirm(`De
  async function saveLayout(placements:Placement[]){let updated=await api<Node[]>(`${subjectPath()}/roadmap/layout`,json("PUT",{nodes:placements}));setNodes(updated)}
  async function uploadBundle(raw:string,target:string){
   if(!user)throw Error("Sign in before importing materials");
+  if(target==="empty"){
+    let created=await api<Subject>("/subjects",json("POST",{title:"Subject Name"}));
+    setModal(null);setPromptForImport("");
+    message("Created an empty subject named Subject Name.");
+    skipSubjectEffect.current=String(created.id);
+    setSubject(String(created.id));
+    let [list]=await Promise.all([api<Subject[]>("/subjects"),load(String(created.id),false,false)]);
+    setSubjects(list);
+    return;
+  }
   let found=extractJson(raw);
   if("error" in found)throw Error(found.error);
   let source:any=found.value;
