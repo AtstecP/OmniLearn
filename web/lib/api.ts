@@ -16,6 +16,8 @@ export async function api<T=any>(path: string, init?: RequestInit): Promise<T> {
     } catch { body = init?.body; }
   }
   const res = await fetch(`${base}${path}`, { ...init, body, headers, cache: "no-store", credentials: "same-origin" });
+  if (res.status === 304 && (init as any)?.onNotModified) return (init as any).onNotModified();
+  (init as any)?.onResponse?.(res);
   if (!res.ok) {
     let detail: any = `${res.status} ${res.statusText}`;
     if (res.status === 413) detail = "This file is too big for the server, even compressed (limit about 4.5 MB). Split it into two or three smaller JSON files and import them one after another.";
@@ -35,3 +37,21 @@ export async function api<T=any>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 export const json = (method:string, body:any):RequestInit => ({method,body:JSON.stringify(body)});
+
+// Subject workspace with an ETag: when nothing changed the API answers 304 (a few bytes) and the copy we
+// already have is reused, so routine refreshes do not pull the whole subject out of the database again.
+const tagged = new Map<string, { tag: string; data: any }>();
+export async function apiTagged<T = any>(path: string, seed?: { tag?: string; data: T } | null): Promise<{ data: T; tag: string }> {
+  const have = tagged.get(path) || (seed?.tag ? { tag: seed.tag, data: seed.data } : null);
+  let tag = "";
+  const init: any = {
+    headers: have ? { "If-None-Match": have.tag } : undefined,
+    onNotModified: () => have!.data,
+    onResponse: (r: Response) => { tag = r.headers.get("ETag") || ""; },
+  };
+  const data = await api<T>(path, init);
+  if (have && data === have.data) return { data, tag: have.tag };
+  if (tag) tagged.set(path, { tag, data }); else tagged.delete(path);
+  return { data, tag };
+}
+export const clearTagged = () => tagged.clear();

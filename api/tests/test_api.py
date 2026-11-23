@@ -212,6 +212,37 @@ def test_attempt_flags_and_clears_a_mistake(course):
     assert c.get(f"/subjects/{sid}/mistakes").json() == []
 
 
+def test_mistake_failures_and_order(course):
+    c, sid = course
+    t1, t2 = c.get(f"/subjects/{sid}/workspace").json()["tests"][:2]
+    for t, n in ((t1, 2), (t2, 1)):
+        for _ in range(n):
+            c.post(f"/subjects/{sid}/tests/{t['id']}/attempts", json={"selected_index": 1 - t["correct_index"]})
+    got = c.get(f"/subjects/{sid}/mistakes").json()
+    assert [(x["question"]["id"], x["failures"]) for x in got] == [(t2["id"], 1), (t1["id"], 2)]   # newest first
+    assert c.get(f"/subjects/{sid}/workspace").json()["dashboard"]["mistakes"] == 2
+
+
+def test_workspace_etag_gives_304_until_something_changes(course, bob):
+    c, sid = course
+    r = c.get(f"/subjects/{sid}/workspace")
+    tag = r.headers["etag"]
+    assert r.status_code == 200 and tag.startswith('"ws-')
+    same = c.get(f"/subjects/{sid}/workspace", headers={"If-None-Match": tag})
+    assert same.status_code == 304 and same.content == b""
+    assert c.get(f"/subjects/{sid}/workspace", headers={"If-None-Match": "W/" + tag}).status_code == 304
+    # another account never gets a 304 (or anything) for my subject
+    assert bob.get(f"/subjects/{sid}/workspace", headers={"If-None-Match": tag}).status_code == 404
+    # any change, including per-user progress, gives a new tag and the full body
+    lesson = r.json()["roadmap"][0]["id"]
+    c.post(f"/subjects/{sid}/nodes/{lesson}/progress?status=mastered")
+    after = c.get(f"/subjects/{sid}/workspace", headers={"If-None-Match": tag})
+    assert after.status_code == 200 and after.headers["etag"] != tag and after.json()["progress"][lesson] == "mastered"
+    t = after.json()["tests"][0]
+    c.post(f"/subjects/{sid}/tests/{t['id']}/attempts", json={"selected_index": t["correct_index"]})
+    assert c.get(f"/subjects/{sid}/workspace", headers={"If-None-Match": after.headers["etag"]}).status_code == 200
+
+
 # ------------------------------------------------------------------ one account cannot see another's data
 
 def test_other_accounts_cannot_touch_my_subject(course, bob):
