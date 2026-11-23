@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://omnilearn:omnilearn@db:5432/omnilearn"
     cors_origins: str = "http://localhost:3000"
     jwt_secret: str = DEFAULT_JWT_SECRET
-    jwt_expire_minutes: int = 1440
+    jwt_expire_minutes: int = 43200  # 30 days
     # Session cookie. Keep Secure on for any HTTPS deployment; local Docker over
     # plain http sets COOKIE_SECURE=false.
     cookie_name: str = "omnilearn_session"

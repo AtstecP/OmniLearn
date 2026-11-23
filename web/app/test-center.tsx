@@ -21,6 +21,9 @@ type Props<T extends Q> = {
   questions: T[];
   busy: boolean;
   onStart: (list: T[], options: TestOptions) => void;
+  resume?: { title: string; answered: number; total: number } | null; // a test left half way
+  onResume?: () => void;
+  onDiscard?: () => void;
   onPractice: (id: string) => void;
   onRemove: (ids: string[], what: string) => void;
 };
@@ -28,7 +31,7 @@ type Props<T extends Q> = {
 const BANK = "bank";
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-export default function TestCenter<T extends Q>({ nodes, questions, busy, onStart, onPractice, onRemove }: Props<T>) {
+export default function TestCenter<T extends Q>({ nodes, questions, busy, onStart, resume, onResume, onDiscard, onPractice, onRemove }: Props<T>) {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState<Set<string>>(new Set());
@@ -94,6 +97,18 @@ export default function TestCenter<T extends Q>({ nodes, questions, busy, onStar
 
   return (
     <div className="test-center">
+      {resume && (
+        <section className="panel tc-resume" aria-label="Unfinished test">
+          <div>
+            <div className="panel-title">You left a test half way</div>
+            <div className="panel-subtitle">{resume.title}: {resume.answered} of {resume.total} answered</div>
+          </div>
+          <div className="tc-resume-actions">
+            <button type="button" className="btn primary" disabled={busy} onClick={onResume}><Play size={16} />Continue last attempt</button>
+            <button type="button" className="btn" onClick={() => { if (window.confirm("Discard the unfinished test? Its answers are lost.")) onDiscard?.(); }}>Discard</button>
+          </div>
+        </section>
+      )}
       <section className="panel tc-settings">
         <div className="panel-header">
           <div>
