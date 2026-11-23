@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from sqlalchemy import and_, delete, desc, func, select
+from sqlalchemy import and_, delete, desc, func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, defer
@@ -283,18 +283,18 @@ def reading_summaries(db: Session, subject_id: UUID):
 
 
 def reading_rows(db: Session, subject_id: UUID, reading_id: UUID | None = None):
-    rows = db.execute(
-        select(m.ReadingPassage, m.ReadingQuestion)
-        .outerjoin(m.ReadingQuestion, m.ReadingQuestion.reading_id == m.ReadingPassage.id)
-        .where(m.ReadingPassage.subject_id == subject_id, *([m.ReadingPassage.id == reading_id] if reading_id else []))
-        .order_by(m.ReadingPassage.order_index, m.ReadingPassage.created_at, m.ReadingQuestion.order_index)
-    ).all()
-    grouped = {}
-    for passage, question in rows:
-        item = grouped.setdefault(passage.id, {"id": passage.id, "subject_id": passage.subject_id, "title": passage.title, "level": passage.cefr_level,
-                                               "passage_markdown": passage.content, "audio_url": passage.audio_url, "questions": []})
-        if question:
-            item["questions"].append(dump(question))
+    """Readings with text and questions. Two queries (not a join) so each text leaves the database once,
+    not once per question: database egress is what the hosting plan meters."""
+    only = [m.ReadingPassage.id == reading_id] if reading_id else []
+    passages = db.scalars(select(m.ReadingPassage).where(m.ReadingPassage.subject_id == subject_id, *only)
+                          .order_by(m.ReadingPassage.order_index, m.ReadingPassage.created_at)).all()
+    grouped = {p.id: {"id": p.id, "subject_id": p.subject_id, "title": p.title, "level": p.cefr_level,
+                      "passage_markdown": p.content, "audio_url": p.audio_url, "questions": []} for p in passages}
+    if grouped:
+        questions = db.scalars(select(m.ReadingQuestion).where(m.ReadingQuestion.reading_id.in_(list(grouped)))
+                               .order_by(m.ReadingQuestion.order_index)).all()
+        for q in questions:
+            grouped[q.reading_id]["questions"].append(dump(q))
     return list(grouped.values())
 
 
@@ -320,17 +320,19 @@ def delete_phrase(subject_id: UUID, phrase_id: UUID, db: Session = Depends(get_d
 
 
 def mistake_rows(db: Session, subject_id: UUID, user: m.User):
+    """Questions whose latest attempt is a flagged mistake. The latest attempt and the failure count are
+    worked out in the database, so only the flagged questions are sent, once each."""
+    A = m.UserTestAttempt
+    mine = and_(A.user_id == user.id, A.test_id.in_(select(m.TestQuestion.id).where(m.TestQuestion.subject_id == subject_id)))
+    latest = (select(A.test_id, A.is_flagged_mistake, A.consecutive_correct_in_retest, A.attempted_at).where(mine)
+              .distinct(A.test_id).order_by(A.test_id, desc(A.attempted_at)).subquery())
+    fails = select(A.test_id, func.count().filter(A.is_correct.is_(False)).label("n")).where(mine).group_by(A.test_id).subquery()
     rows = db.execute(
-        select(m.UserTestAttempt, m.TestQuestion)
-        .join(m.TestQuestion, m.TestQuestion.id == m.UserTestAttempt.test_id)
-        .where(m.UserTestAttempt.user_id == user.id, m.TestQuestion.subject_id == subject_id)
-        .order_by(desc(m.UserTestAttempt.attempted_at))
+        select(m.TestQuestion, latest.c.consecutive_correct_in_retest, fails.c.n)
+        .join(latest, latest.c.test_id == m.TestQuestion.id).join(fails, fails.c.test_id == m.TestQuestion.id)
+        .where(latest.c.is_flagged_mistake.is_(True)).order_by(desc(latest.c.attempted_at))
     ).all()
-    latest, failures = {}, defaultdict(int)
-    for attempt, question in rows:
-        failures[question.id] += not attempt.is_correct
-        latest.setdefault(question.id, (attempt, question))
-    return [{"question": q, "failures": failures[q.id], "streak": a.consecutive_correct_in_retest} for a, q in latest.values() if a.is_flagged_mistake]
+    return [{"question": q, "failures": n, "streak": streak} for q, streak, n in rows]
 
 
 def dashboard_numbers(subject_id, roadmap, progress, tests, cards, readings, mistakes):
@@ -348,8 +350,46 @@ def dashboard_numbers(subject_id, roadmap, progress, tests, cards, readings, mis
     }
 
 
+WORKSPACE_FINGERPRINT = text("""
+SELECT md5(concat_ws('|',
+  (SELECT md5(s::text) FROM subjects s WHERE s.id = :sid),
+  (SELECT md5(string_agg(md5(x::text), '' ORDER BY x.id)) FROM roadmap_nodes x WHERE x.subject_id = :sid),
+  (SELECT md5(string_agg(md5(x::text), '' ORDER BY x.id)) FROM tests x WHERE x.subject_id = :sid),
+  (SELECT md5(string_agg(md5(x::text), '' ORDER BY x.id)) FROM vocab_cards x WHERE x.subject_id = :sid),
+  (SELECT md5(string_agg(md5(x::text), '' ORDER BY x.id)) FROM dictation_phrases x WHERE x.subject_id = :sid),
+  (SELECT md5(string_agg(md5(x::text), '' ORDER BY x.id)) FROM reading_passages x WHERE x.subject_id = :sid),
+  (SELECT md5(string_agg(q.id::text, '' ORDER BY q.id)) FROM reading_questions q JOIN reading_passages x ON x.id = q.reading_id WHERE x.subject_id = :sid),
+  (SELECT md5(string_agg(md5(p::text), '' ORDER BY p.node_id)) FROM user_node_progress p JOIN roadmap_nodes x ON x.id = p.node_id WHERE x.subject_id = :sid AND p.user_id = :uid),
+  (SELECT md5(string_agg(md5(p::text), '' ORDER BY p.card_id)) FROM user_vocab_progress p JOIN vocab_cards x ON x.id = p.card_id WHERE x.subject_id = :sid AND p.user_id = :uid),
+  (SELECT count(*) FROM user_vocab_progress p JOIN vocab_cards x ON x.id = p.card_id WHERE x.subject_id = :sid AND p.user_id = :uid AND p.due_date <= now()),
+  (SELECT md5(string_agg(md5(a::text), '' ORDER BY a.id)) FROM user_test_attempts a JOIN tests x ON x.id = a.test_id WHERE x.subject_id = :sid AND a.user_id = :uid),
+  (SELECT md5(string_agg(md5(e::text), '' ORDER BY e.id)) FROM roadmap_edges e WHERE e.subject_id = :sid),
+  (SELECT md5(string_agg(f.kind || f.item_id::text, '' ORDER BY f.kind, f.item_id)) FROM user_favorites f WHERE f.subject_id = :sid AND f.user_id = :uid),
+  :uid
+))""")
+
+
+def workspace_etag(db: Session, subject_id: UUID, user: m.User) -> str:
+    """A hash of everything the workspace response is built from, computed inside the database, so
+    checking "has anything changed?" sends 32 characters instead of the whole subject. The due-card count
+    is part of it because 'is_due' depends on the clock."""
+    return '"ws-' + db.execute(WORKSPACE_FINGERPRINT, {"sid": subject_id, "uid": user.id}).scalar_one() + '"'
+
+
 @app.get("/subjects/{subject_id}/workspace")
-def subject_workspace(subject_id: UUID, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+def subject_workspace(subject_id: UUID, response: Response, db: Session = Depends(get_db), user: m.User = Depends(get_current_user),
+                      if_none_match: str | None = Header(default=None)):
+    """Sends an ETag; a request whose If-None-Match still matches gets an empty 304 (the client keeps its copy)."""
+    require_subject(db, subject_id, user)
+    tag = workspace_etag(db, subject_id, user)
+    if if_none_match and tag in [t.strip().removeprefix("W/") for t in if_none_match.split(",")]:
+        return Response(status_code=304, headers={"ETag": tag, "Cache-Control": "private, no-cache"})
+    response.headers["ETag"] = tag
+    response.headers["Cache-Control"] = "private, no-cache"
+    return build_workspace(db, subject_id, user)
+
+
+def build_workspace(db: Session, subject_id: UUID, user: m.User):
     """Everything the UI needs for one subject in 9 queries; dashboard numbers are derived from the lists.
     `roadmap` holds the lessons; `canvas` adds the other canvas blocks, the edges and the canvas version."""
     subject = require_subject(db, subject_id, user)
@@ -371,7 +411,7 @@ def subject_workspace(subject_id: UUID, db: Session = Depends(get_db), user: m.U
 
 @app.get("/subjects/{subject_id}/dashboard")
 def dashboard(subject_id: UUID, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
-    return subject_workspace(subject_id, db, user)["dashboard"]
+    return build_workspace(db, subject_id, user)["dashboard"]
 
 
 @app.get("/subjects/{subject_id}/roadmap")
@@ -834,7 +874,7 @@ def update_reading(subject_id: UUID, reading_id: UUID, payload: ReadingUpdate, d
         db.add_all(m.ReadingQuestion(id=uuid4(), reading_id=reading_id, order_index=j, prompt=q.prompt, options=q.options,
                                      correct_index=q.correct_index, explanation=q.explanation) for j, q in enumerate(questions))
     commit_or_422(db)
-    return next(r for r in reading_rows(db, subject_id) if r["id"] == reading_id)
+    return next(r for r in reading_rows(db, subject_id, reading_id))
 
 
 @app.delete("/subjects/{subject_id}/readings/{reading_id}", status_code=204)
