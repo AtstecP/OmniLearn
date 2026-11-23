@@ -15,8 +15,8 @@ from .gzip_body import GzipRequestMiddleware
 from . import models as m
 from .auth import clear_session_cookie, get_current_user, hash_password, set_session_cookie, verify_password
 from .bundle import Bundle, BundleError, Lesson, Question, parse_bundle, parse_question
-from .schemas import (AccountDeleteIn, AttemptIn, CardCreate, LoginIn, NodeCreate, NodeUpdate, BulkIdsIn, PasswordChangeIn, PhraseIn, ReadingUpdate, RegisterIn,
-                      ReviewIn, RoadmapLayoutIn, SubjectDeleteIn, SubjectIn, TestCreate)
+from .schemas import (AccountDeleteIn, AttemptIn, CanvasBatchIn, CardCreate, EdgeIn, EdgeUpdate, LoginIn, NodeCreate, NodeUpdate, BulkIdsIn, PasswordChangeIn, PhraseIn,
+                      ReadingUpdate, RegisterIn, ReviewIn, RoadmapLayoutIn, SubjectDeleteIn, SubjectIn, TestCreate)
 
 if settings.cookie_secure and (settings.jwt_secret == DEFAULT_JWT_SECRET or len(settings.jwt_secret) < 32):
     raise RuntimeError("JWT_SECRET must be a unique random value of at least 32 characters when COOKIE_SECURE is on (production).")
@@ -83,11 +83,34 @@ def commit_or_422(db: Session):
         raise HTTPException(422, f"The data breaks a database rule ({constraint or 'integrity check'}).")
 
 
+NODE_FIELDS = ("id", "subject_id", "parent_node_id", "title", "level", "order_index", "position_x", "position_y", "width", "height",
+               "node_type", "created_at", "updated_at")
+LESSON = "material"  # node_type of a lesson; topic/quiz/note/resource blocks exist only on the canvas
+COL_W, ROW_H = 340, 120  # spacing of automatically placed lessons (same as migration 0007)
+
+
 def node_json(node: m.RoadmapNode, test_ids: list[UUID], lite: bool = False):
     """lite leaves out the lesson text (it is fetched when a lesson is opened)."""
-    if lite:
-        return {c.name: getattr(node, c.name) for c in node.__table__.columns if c.name != "content_markdown"} | {"test_ids": test_ids}
-    return {**dump(node), "test_ids": test_ids}
+    out = {f: getattr(node, f) for f in NODE_FIELDS} | {"metadata": node.meta or {}, "test_ids": test_ids}
+    if not lite:
+        out["content_markdown"] = node.content_markdown
+    return out
+
+
+def edge_json(e: m.RoadmapEdge):
+    return {"id": e.id, "source_node_id": e.source_node_id, "target_node_id": e.target_node_id, "edge_type": e.edge_type,
+            "label": e.label, "metadata": e.meta or {}}
+
+
+def bump_canvas(subject: m.Subject):
+    """Every change to which blocks/edges exist or where they sit moves the canvas version on."""
+    subject.canvas_version = (subject.canvas_version or 0) + 1
+
+
+def canvas_bottom(db: Session, subject_id: UUID) -> float:
+    """A y coordinate below everything on the canvas (where new, unplaced lessons go)."""
+    y = db.scalar(select(func.max(m.RoadmapNode.position_y)).where(m.RoadmapNode.subject_id == subject_id))
+    return 0.0 if y is None else float(y) + ROW_H * 2
 
 
 # ---------------------------------------------------------------- accounts
@@ -184,8 +207,11 @@ def delete_subject(subject_id: UUID, payload: SubjectDeleteIn, db: Session = Dep
     db.commit()
 
 
-def roadmap_rows(db: Session, subject_id: UUID, lite: bool = False):
+def roadmap_rows(db: Session, subject_id: UUID, lite: bool = False, lessons_only: bool = True):
+    """Lessons (node_type material) by default: every older view works on lessons only."""
     stmt = select(m.RoadmapNode).where(m.RoadmapNode.subject_id == subject_id).order_by(m.RoadmapNode.order_index, m.RoadmapNode.created_at)
+    if lessons_only:
+        stmt = stmt.where(m.RoadmapNode.node_type == LESSON)
     if lite:
         stmt = stmt.options(defer(m.RoadmapNode.content_markdown))
     return db.scalars(stmt).all()
@@ -324,8 +350,9 @@ def dashboard_numbers(subject_id, roadmap, progress, tests, cards, readings, mis
 
 @app.get("/subjects/{subject_id}/workspace")
 def subject_workspace(subject_id: UUID, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
-    """Everything the UI needs for one subject in 7 queries; dashboard numbers are derived from the lists."""
-    require_subject(db, subject_id, user)
+    """Everything the UI needs for one subject in 9 queries; dashboard numbers are derived from the lists.
+    `roadmap` holds the lessons; `canvas` adds the other canvas blocks, the edges and the canvas version."""
+    subject = require_subject(db, subject_id, user)
     tests = test_rows(db, subject_id)
     roadmap = roadmap_json(roadmap_rows(db, subject_id, lite=True), tests, lite=True)
     progress = progress_map(db, subject_id, user)
@@ -338,6 +365,7 @@ def subject_workspace(subject_id: UUID, db: Session = Depends(get_db), user: m.U
                       .order_by(m.UserFavorite.created_at.desc())).all()
     favorites = [{"kind": k, "item_id": str(i)} for k, i in favs if str(i) in alive.get(k, ())]
     return {"roadmap": roadmap, "tests": tests, "cards": cards, "readings": readings, "phrases": phrases, "mistakes": mistakes, "progress": progress, "favorites": favorites,
+            "canvas": canvas_extras(db, subject),
             "dashboard": dashboard_numbers(subject_id, roadmap, progress, tests, cards, readings, mistakes)}
 
 
@@ -414,15 +442,27 @@ def update_roadmap_layout(subject_id: UUID, payload: RoadmapLayoutIn, db: Sessio
 
 @app.post("/subjects/{subject_id}/nodes", status_code=201)
 def create_node(subject_id: UUID, payload: NodeCreate, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
-    require_subject(db, subject_id, user)
+    """Add a lesson (the canvas creates its blocks through PUT /canvas/layout)."""
+    subject = require_subject(db, subject_id, user)
     if payload.parent_node_id:
         require_item(db, m.RoadmapNode, subject_id, payload.parent_node_id, user, "Parent lesson")
     order = payload.order_index
     if order is None:
-        order = next_position(db, m.RoadmapNode, m.RoadmapNode.subject_id == subject_id, same_parent(m.RoadmapNode.parent_node_id, payload.parent_node_id))
-    obj = m.RoadmapNode(subject_id=subject_id, parent_node_id=payload.parent_node_id, title=payload.title, level=payload.level,
-                        order_index=order, content_markdown=payload.content_markdown)
-    db.add(obj); commit_or_422(db); db.refresh(obj)
+        order = next_position(db, m.RoadmapNode, m.RoadmapNode.subject_id == subject_id, m.RoadmapNode.node_type == LESSON,
+                              same_parent(m.RoadmapNode.parent_node_id, payload.parent_node_id))
+    x, y = 0.0, canvas_bottom(db, subject_id)
+    if payload.parent_node_id:  # next to its parent on the canvas, below its siblings
+        parent = db.get(m.RoadmapNode, payload.parent_node_id)
+        low = db.scalar(select(func.max(m.RoadmapNode.position_y)).where(m.RoadmapNode.parent_node_id == parent.id))
+        x, y = parent.position_x + COL_W, (parent.position_y if low is None else low + ROW_H)
+    obj = m.RoadmapNode(id=uuid4(), subject_id=subject_id, parent_node_id=payload.parent_node_id, title=payload.title, level=payload.level,
+                        order_index=order, content_markdown=payload.content_markdown, position_x=x, position_y=y)
+    db.add(obj)
+    if payload.parent_node_id:
+        db.flush()
+        db.add(m.RoadmapEdge(subject_id=subject_id, source_node_id=payload.parent_node_id, target_node_id=obj.id))
+    bump_canvas(subject)
+    commit_or_422(db); db.refresh(obj)
     return node_json(obj, [])
 
 
@@ -439,14 +479,23 @@ def update_node(subject_id: UUID, node_id: UUID, payload: NodeUpdate, db: Sessio
 @app.delete("/subjects/{subject_id}/nodes/{node_id}", status_code=204)
 def delete_node(subject_id: UUID, node_id: UUID, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
     obj = require_item(db, m.RoadmapNode, subject_id, node_id, user, "Lesson")
-    # Sub-topics move up one level instead of becoming main steps; linked questions stay in the bank.
-    base = next_position(db, m.RoadmapNode, m.RoadmapNode.subject_id == subject_id, same_parent(m.RoadmapNode.parent_node_id, obj.parent_node_id))
-    children = db.scalars(select(m.RoadmapNode).where(m.RoadmapNode.parent_node_id == node_id).order_by(m.RoadmapNode.order_index)).all()
+    remove_node(db, obj)
+    bump_canvas(db.get(m.Subject, subject_id))
+    db.commit()
+
+
+def remove_node(db: Session, obj: m.RoadmapNode):
+    """Delete a block. A lesson's sub-topics move up one level instead of becoming main steps;
+    linked questions stay in the bank; its edges, progress rows and favourites' targets go."""
+    base = next_position(db, m.RoadmapNode, m.RoadmapNode.subject_id == obj.subject_id, m.RoadmapNode.node_type == LESSON,
+                         same_parent(m.RoadmapNode.parent_node_id, obj.parent_node_id))
+    children = db.scalars(select(m.RoadmapNode).where(m.RoadmapNode.parent_node_id == obj.id).order_by(m.RoadmapNode.order_index)).all()
     for i, child in enumerate(children):
         child.parent_node_id = obj.parent_node_id
         child.order_index = base + i
     db.flush()
-    db.delete(obj); db.commit()
+    db.delete(obj)
+    db.flush()
 
 
 @app.delete("/subjects/{subject_id}/nodes/{node_id}/tests/{test_id}")
@@ -479,6 +528,165 @@ def set_node_progress(subject_id: UUID, node_id: UUID, status: str = Query(..., 
         log_activity(db, user, day)
     db.commit(); db.refresh(progress)
     return progress
+
+
+# ---------------------------------------------------------------- canvas
+
+def canvas_extras(db: Session, subject: m.Subject) -> dict:
+    """The canvas data the lesson list does not carry: non-lesson blocks, edges and the version."""
+    others = db.scalars(select(m.RoadmapNode).where(m.RoadmapNode.subject_id == subject.id, m.RoadmapNode.node_type != LESSON)
+                        .options(defer(m.RoadmapNode.content_markdown)).order_by(m.RoadmapNode.created_at)).all()
+    edges = db.scalars(select(m.RoadmapEdge).where(m.RoadmapEdge.subject_id == subject.id).order_by(m.RoadmapEdge.created_at)).all()
+    return {"subject_id": str(subject.id), "version": subject.canvas_version or 0, "nodes": [node_json(n, [], lite=True) for n in others], "edges": [edge_json(e) for e in edges]}
+
+
+@app.get("/subjects/{subject_id}/canvas")
+def get_canvas(subject_id: UUID, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+    """Every block (lessons without their text, plus topics, quizzes, notes, resources), every edge, the version."""
+    subject = require_subject(db, subject_id, user)
+    tests = test_rows(db, subject_id)
+    extras = canvas_extras(db, subject)
+    return {"subject_id": extras["subject_id"], "version": extras["version"], "nodes": roadmap_json(roadmap_rows(db, subject_id, lite=True), tests, lite=True) + extras["nodes"],
+            "edges": extras["edges"]}
+
+
+DEFAULT_TITLES = {"material": "New lesson", "topic": "New topic", "quiz": "Quiz", "note": "Note", "resource": "Resource"}
+
+
+def edge_end(ref: str, id_map: dict, alive: set) -> UUID:
+    """An edge end is an existing block id or the client_id of a block created in the same batch."""
+    if ref in id_map:
+        return id_map[ref]
+    try:
+        node_id = UUID(ref)
+    except ValueError:
+        raise HTTPException(422, f"Unknown block for a connection: {ref}")
+    if node_id not in alive:
+        raise HTTPException(422, f"Unknown block for a connection: {ref}")
+    return node_id
+
+
+@app.put("/subjects/{subject_id}/canvas/layout")
+def save_canvas(subject_id: UUID, payload: CanvasBatchIn, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+    """Apply a batch of canvas changes in one transaction: created/updated/deleted blocks and edges.
+
+    base_version must equal the stored canvas version; otherwise nothing is saved and the answer is
+    409 with the current version, so the client reloads, re-applies its own changes and retries.
+    New blocks carry a client_id; the answer maps every client_id to the id the server generated.
+    Deleting a lesson block deletes the lesson (its questions stay in the bank)."""
+    subject = require_subject(db, subject_id, user)
+    db.refresh(subject, with_for_update=True)  # serialise saves of the same canvas
+    if payload.base_version != (subject.canvas_version or 0):
+        raise HTTPException(409, {"message": "The canvas changed somewhere else.", "version": subject.canvas_version or 0})
+    nodes = {n.id: n for n in roadmap_rows(db, subject_id, lite=True, lessons_only=False)}
+    edges = {e.id: e for e in db.scalars(select(m.RoadmapEdge).where(m.RoadmapEdge.subject_id == subject_id)).all()}
+    lessons_changed = False
+
+    for node_id in payload.delete_nodes:  # ids already gone are ignored (a retried request)
+        obj = nodes.pop(node_id, None)
+        if obj:
+            lessons_changed |= obj.node_type == LESSON
+            for e in [e for e in edges.values() if node_id in (e.source_node_id, e.target_node_id)]:
+                edges.pop(e.id)
+            remove_node(db, obj)
+
+    id_map: dict[str, UUID] = {}
+    for item in payload.create_nodes:
+        if item.client_id in id_map:
+            raise HTTPException(422, f"Duplicate client_id: {item.client_id}")
+        content, level = item.content_markdown, item.level
+        if item.copy_of and item.copy_of in nodes and nodes[item.copy_of].node_type == LESSON:
+            src = db.get(m.RoadmapNode, item.copy_of)
+            content, level = src.content_markdown, level or src.level
+        obj = m.RoadmapNode(id=uuid4(), subject_id=subject_id, node_type=item.node_type, title=(item.title or "").strip() or DEFAULT_TITLES[item.node_type],
+                            level=level, content_markdown=content if item.node_type == LESSON else "", meta=item.metadata,
+                            position_x=item.position_x, position_y=item.position_y, width=item.width, height=item.height,
+                            order_index=next_position(db, m.RoadmapNode, m.RoadmapNode.subject_id == subject_id, m.RoadmapNode.parent_node_id.is_(None)) if item.node_type == LESSON else 0)
+        db.add(obj)
+        db.flush()
+        nodes[obj.id] = obj
+        id_map[item.client_id] = obj.id
+        lessons_changed |= item.node_type == LESSON
+
+    for patch in payload.update_nodes:  # ids already gone are ignored
+        obj = nodes.get(patch.id)
+        if not obj:
+            continue
+        fields = patch.model_fields_set
+        for name in ("position_x", "position_y", "width", "height", "level"):
+            if name in fields:
+                setattr(obj, name, getattr(patch, name))
+        if "title" in fields and (patch.title or "").strip():
+            obj.title = patch.title.strip()
+            lessons_changed |= obj.node_type == LESSON
+        if "metadata" in fields and patch.metadata is not None:
+            obj.meta = patch.metadata
+
+    for edge_id in payload.delete_edges:
+        e = edges.pop(edge_id, None)
+        if e:
+            db.delete(e)
+    alive = set(nodes)
+    for item in payload.create_edges:
+        source, target = edge_end(item.source, id_map, alive), edge_end(item.target, id_map, alive)
+        if source == target:
+            raise HTTPException(422, "A block cannot be connected to itself")
+        e = m.RoadmapEdge(id=uuid4(), subject_id=subject_id, source_node_id=source, target_node_id=target, edge_type=item.edge_type,
+                          label=item.label, meta=item.metadata)
+        db.add(e)
+        edges[e.id] = e
+        if item.client_id:
+            id_map[item.client_id] = e.id
+    for patch in payload.update_edges:
+        e = edges.get(patch.id)
+        if not e:
+            continue
+        fields = patch.model_fields_set
+        if "edge_type" in fields and patch.edge_type:
+            e.edge_type = patch.edge_type
+        if "label" in fields:
+            e.label = (patch.label or "").strip() or None
+
+    bump_canvas(subject)
+    commit_or_422(db)
+    return {"version": subject.canvas_version, "id_map": {k: str(v) for k, v in id_map.items()}, "lessons_changed": lessons_changed}
+
+
+@app.post("/subjects/{subject_id}/edges", status_code=201)
+def create_edge(subject_id: UUID, payload: EdgeIn, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+    subject = require_subject(db, subject_id, user)
+    for node_id in (payload.source_node_id, payload.target_node_id):
+        require_item(db, m.RoadmapNode, subject_id, node_id, user, "Block")
+    if payload.source_node_id == payload.target_node_id:
+        raise HTTPException(422, "A block cannot be connected to itself")
+    e = m.RoadmapEdge(subject_id=subject_id, source_node_id=payload.source_node_id, target_node_id=payload.target_node_id,
+                      edge_type=payload.edge_type, label=payload.label, meta=payload.metadata)
+    db.add(e)
+    bump_canvas(subject)
+    commit_or_422(db); db.refresh(e)
+    return edge_json(e)
+
+
+@app.put("/subjects/{subject_id}/edges/{edge_id}")
+def update_edge(subject_id: UUID, edge_id: UUID, payload: EdgeUpdate, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+    e = require_item(db, m.RoadmapEdge, subject_id, edge_id, user, "Connection")
+    if payload.edge_type:
+        e.edge_type = payload.edge_type
+    if "label" in payload.model_fields_set:
+        e.label = (payload.label or "").strip() or None
+    if payload.metadata is not None:
+        e.meta = payload.metadata
+    bump_canvas(db.get(m.Subject, subject_id))
+    commit_or_422(db); db.refresh(e)
+    return edge_json(e)
+
+
+@app.delete("/subjects/{subject_id}/edges/{edge_id}", status_code=204)
+def delete_edge(subject_id: UUID, edge_id: UUID, db: Session = Depends(get_db), user: m.User = Depends(get_current_user)):
+    e = require_item(db, m.RoadmapEdge, subject_id, edge_id, user, "Connection")
+    db.delete(e)
+    bump_canvas(db.get(m.Subject, subject_id))
+    db.commit()
 
 
 # ---------------------------------------------------------------- tests
@@ -705,19 +913,35 @@ def write_bundle(db: Session, subject: m.Subject, bundle: Bundle, lesson_id: UUI
     """Insert a parsed bundle in one transaction. IDs are generated here, so the
     whole nested course is built in memory and flushed in a few batched INSERTs."""
     rows: list = []
+    edges: list = []
+    # New lessons go on the canvas below everything already there (into a lesson: to its right),
+    # laid out like a tree, and every nesting link becomes an edge. Existing blocks never move.
+    x0, row = 0.0, 0
+    y0 = canvas_bottom(db, subject.id)
+    if lesson_id:
+        host = db.get(m.RoadmapNode, lesson_id)
+        x0 = host.position_x + COL_W
 
-    def add_lesson(lesson: Lesson, parent: UUID | None, position: int):
+    def add_lesson(lesson: Lesson, parent: UUID | None, position: int, depth: int):
+        nonlocal row
         node = m.RoadmapNode(id=uuid4(), subject_id=subject.id, parent_node_id=parent, order_index=position, title=lesson.title,
-                             level=lesson.level, content_markdown=lesson.content)
+                             level=lesson.level, content_markdown=lesson.content, position_x=x0 + depth * COL_W, position_y=y0 + row * ROW_H)
+        row += 1
         rows.append(node)
+        if parent:
+            edges.append(m.RoadmapEdge(id=uuid4(), subject_id=subject.id, source_node_id=parent, target_node_id=node.id))
         rows.extend(question_row(subject.id, node.id, q, i) for i, q in enumerate(lesson.questions))
         for i, child in enumerate(lesson.lessons):
-            add_lesson(child, node.id, i)
+            add_lesson(child, node.id, i, depth + 1)
 
     # When importing into a lesson, new lessons become its sub-topics.
-    root_start = next_position(db, m.RoadmapNode, m.RoadmapNode.subject_id == subject.id, same_parent(m.RoadmapNode.parent_node_id, lesson_id))
+    root_start = next_position(db, m.RoadmapNode, m.RoadmapNode.subject_id == subject.id, m.RoadmapNode.node_type == LESSON,
+                               same_parent(m.RoadmapNode.parent_node_id, lesson_id))
     for i, lesson in enumerate(bundle.lessons):
-        add_lesson(lesson, lesson_id, root_start + i)
+        add_lesson(lesson, lesson_id, root_start + i, 0)
+        row += 1
+    if bundle.lessons:
+        bump_canvas(subject)
 
     question_start = next_position(db, m.TestQuestion, m.TestQuestion.subject_id == subject.id, same_parent(m.TestQuestion.node_id, lesson_id))
     rows.extend(question_row(subject.id, lesson_id, q, question_start + i) for i, q in enumerate(bundle.questions))
@@ -739,6 +963,9 @@ def write_bundle(db: Session, subject: m.Subject, bundle: Bundle, lesson_id: UUI
         rows.extend(m.ReadingQuestion(id=uuid4(), reading_id=passage.id, order_index=j, prompt=q.prompt, options=q.options,
                                       correct_index=q.correct_index, explanation=q.explanation) for j, q in enumerate(r.questions))
     db.add_all(rows)
+    if edges:
+        db.flush()  # the edges' composite foreign keys need the lessons first
+        db.add_all(edges)
     return bundle.counts()
 
 
@@ -791,7 +1018,9 @@ def replace_content(subject_id: UUID, part: str, payload: Any = Body(...), topic
     if part == "path":
         keep.lessons, keep.questions = bundle.lessons, bundle.questions
         db.execute(delete(m.TestQuestion).where(m.TestQuestion.subject_id == subject_id))
-        db.execute(delete(m.RoadmapNode).where(m.RoadmapNode.subject_id == subject_id))
+        # Lessons only: notes, topics, resources and quizzes on the canvas stay (edges to lessons go).
+        db.execute(delete(m.RoadmapNode).where(m.RoadmapNode.subject_id == subject_id, m.RoadmapNode.node_type == LESSON))
+        bump_canvas(subject)
     elif part == "vocabulary":
         keep.vocabulary = bundle.vocabulary
         cond = [m.VocabCard.subject_id == subject_id]

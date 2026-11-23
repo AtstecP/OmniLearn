@@ -1,6 +1,6 @@
 // Shapes of the API data the app works with.
 export type Subject={id:string;title:string;description?:string;target_level?:string};
-export type Node={id:string;subject_id:string;parent_node_id?:string|null;title:string;level?:string;order_index:number;content_markdown?:string;test_ids:string[]};
+export type Node={id:string;subject_id:string;parent_node_id?:string|null;title:string;level?:string;order_index:number;content_markdown?:string;test_ids:string[];position_x?:number;position_y?:number;width?:number|null;height?:number|null;node_type?:string;metadata?:Record<string,any>};
 export type Test={id:string;subject_id:string;node_id?:string|null;prompt:string;options:string[];correct_index:number;explanation:string;tags:string[]};
 export type Card={id:string;subject_id:string;term:string;part_of_speech?:string;definition:string;example_sentence?:string;image_url?:string;tags:string[];progress?:any;is_due:boolean};
 export type Phrase={id:string;answer:string;translation:string;audio_url?:string|null;tags:string[]};

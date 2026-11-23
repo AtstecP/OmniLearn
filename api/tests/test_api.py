@@ -233,6 +233,9 @@ def test_other_accounts_cannot_touch_my_subject(course, bob):
         ("post", base + "/import", {"vocabulary": [{"term": "x", "definition": "y"}]}),
         ("put", base + "/content/vocabulary", {"vocabulary": []}),
         ("put", base + "/content/path", {"lessons": []}),
+        ("get", base + "/canvas", None),
+        ("put", base + "/canvas/layout", {"base_version": 0, "update_nodes": [{"id": nid, "position_x": 5}]}),
+        ("post", base + "/edges", {"source_node_id": nid, "target_node_id": nid}),
     ]
     for method, path, body in probes:
         r = getattr(bob, method)(path, **({"json": body} if body is not None else {}))
@@ -267,3 +270,158 @@ def test_edit_subject(course):
     c, sid = course
     r = c.put(f"/subjects/{sid}", json={"title": "Renamed subject", "description": "new description"})
     assert r.status_code == 200 and c.get(f"/subjects/{sid}").json()["title"] == "Renamed subject"
+
+
+# ------------------------------------------------------------------ canvas
+
+def canvas(c, sid):
+    r = c.get(f"/subjects/{sid}/canvas")
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def save(c, sid, body):
+    return c.put(f"/subjects/{sid}/canvas/layout", json=body)
+
+
+def test_import_places_lessons_and_links_nesting(course):
+    c, sid = course
+    cv = canvas(c, sid)
+    lessons = {n["title"]: n for n in cv["nodes"]}
+    assert set(lessons) == {"Greetings", "Formal", "Informal", "Food"}
+    assert all(n["node_type"] == "material" for n in lessons.values())
+    # sub-topics sit to the right of their parent, every nesting link is an edge
+    assert lessons["Formal"]["position_x"] > lessons["Greetings"]["position_x"]
+    pairs = {(e["source_node_id"], e["target_node_id"]) for e in cv["edges"]}
+    assert (lessons["Greetings"]["id"], lessons["Formal"]["id"]) in pairs
+    assert (lessons["Greetings"]["id"], lessons["Informal"]["id"]) in pairs
+    assert len(pairs) == 2
+    assert "content_markdown" not in lessons["Greetings"]
+    w = c.get(f"/subjects/{sid}/workspace").json()
+    assert w["canvas"]["version"] == cv["version"] and len(w["canvas"]["edges"]) == 2 and w["canvas"]["nodes"] == []
+    assert w["canvas"]["subject_id"] == sid and cv["subject_id"] == sid  # the client only trusts data tagged with its own subject
+
+
+def test_canvas_batch_create_move_connect_and_delete(course):
+    c, sid = course
+    cv = canvas(c, sid)
+    g = next(n for n in cv["nodes"] if n["title"] == "Greetings")
+    r = save(c, sid, {"base_version": cv["version"],
+                      "create_nodes": [{"client_id": "n1", "node_type": "note", "title": "", "position_x": 10, "position_y": 20, "metadata": {"text": "hi", "color": "yellow"}},
+                                       {"client_id": "t1", "node_type": "topic", "title": "Verbs", "position_x": -300, "position_y": 0}],
+                      "update_nodes": [{"id": g["id"], "position_x": 777, "position_y": -55}],
+                      "create_edges": [{"client_id": "e1", "source": "n1", "target": g["id"], "edge_type": "explains", "label": "see"},
+                                       {"source": "t1", "target": "n1"}]})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["version"] == cv["version"] + 1 and set(out["id_map"]) == {"n1", "t1", "e1"} and out["lessons_changed"] is False
+    cv2 = canvas(c, sid)
+    byid = {n["id"]: n for n in cv2["nodes"]}
+    note = byid[out["id_map"]["n1"]]
+    assert note["node_type"] == "note" and note["title"] == "Note" and note["metadata"] == {"text": "hi", "color": "yellow"}
+    assert byid[g["id"]]["position_x"] == 777 and byid[g["id"]]["position_y"] == -55
+    e1 = next(e for e in cv2["edges"] if e["id"] == out["id_map"]["e1"])
+    assert e1["edge_type"] == "explains" and e1["label"] == "see"
+    # the lesson list (and its text) is untouched by canvas-only blocks
+    w = c.get(f"/subjects/{sid}/workspace").json()
+    assert len(w["roadmap"]) == 4 and {n["node_type"] for n in w["roadmap"]} == {"material"}
+    assert c.get(f"/subjects/{sid}/nodes/{g['id']}").json()["content_markdown"].startswith("# Greetings")
+    # update an edge, delete the note: its edges go with it
+    r = save(c, sid, {"base_version": out["version"], "update_edges": [{"id": e1["id"], "edge_type": "related_to", "label": ""}],
+                      "delete_nodes": [note["id"]]})
+    assert r.status_code == 200, r.text
+    cv3 = canvas(c, sid)
+    assert note["id"] not in {n["id"] for n in cv3["nodes"]}
+    assert all(note["id"] not in (e["source_node_id"], e["target_node_id"]) for e in cv3["edges"])
+
+
+def test_canvas_stale_version_is_rejected(course):
+    c, sid = course
+    cv = canvas(c, sid)
+    g = cv["nodes"][0]
+    assert save(c, sid, {"base_version": cv["version"], "update_nodes": [{"id": g["id"], "position_x": 1}]}).status_code == 200
+    r = save(c, sid, {"base_version": cv["version"], "update_nodes": [{"id": g["id"], "position_x": 2}]})
+    assert r.status_code == 409 and r.json()["detail"]["version"] == cv["version"] + 1
+    assert next(n for n in canvas(c, sid)["nodes"] if n["id"] == g["id"])["position_x"] == 1
+
+
+def test_canvas_rejects_bad_edges_and_saves_nothing(course):
+    c, sid = course
+    cv = canvas(c, sid)
+    g = cv["nodes"][0]["id"]
+    for edge in ({"source": g, "target": g}, {"source": g, "target": "nope"}, {"source": g, "target": "00000000-0000-0000-0000-000000000000"},
+                 {"source": g, "target": cv["nodes"][1]["id"], "edge_type": "bogus"}):
+        r = save(c, sid, {"base_version": cv["version"], "create_nodes": [{"client_id": "x", "node_type": "note", "title": "keep?"}], "create_edges": [edge]})
+        assert r.status_code == 422, (edge, r.status_code)
+    after = canvas(c, sid)
+    assert after["version"] == cv["version"] and len(after["nodes"]) == len(cv["nodes"])
+
+
+def test_canvas_lesson_blocks_are_lessons(course):
+    c, sid = course
+    cv = canvas(c, sid)
+    g = next(n for n in cv["nodes"] if n["title"] == "Greetings")
+    r = save(c, sid, {"base_version": cv["version"], "create_nodes": [{"client_id": "m", "node_type": "material", "title": "Copy", "copy_of": g["id"]}]})
+    assert r.status_code == 200 and r.json()["lessons_changed"] is True
+    new_id = r.json()["id_map"]["m"]
+    lesson = c.get(f"/subjects/{sid}/nodes/{new_id}").json()
+    assert lesson["content_markdown"].startswith("# Greetings") and lesson["test_ids"] == []
+    w = c.get(f"/subjects/{sid}/workspace").json()
+    assert new_id in {n["id"] for n in w["roadmap"]}
+    # deleting the original lesson block deletes the lesson; its sub-topics move up, its questions stay in the bank
+    tests_before = len(w["tests"])
+    r = save(c, sid, {"base_version": r.json()["version"], "delete_nodes": [g["id"]]})
+    assert r.status_code == 200
+    w2 = c.get(f"/subjects/{sid}/workspace").json()
+    assert g["id"] not in {n["id"] for n in w2["roadmap"]} and len(w2["tests"]) == tests_before
+    formal = next(n for n in w2["roadmap"] if n["title"] == "Formal")
+    assert formal["parent_node_id"] is None
+
+
+def test_progress_and_tests_survive_canvas_moves(course):
+    c, sid = course
+    cv = canvas(c, sid)
+    g = next(n for n in cv["nodes"] if n["title"] == "Greetings")
+    assert c.post(f"/subjects/{sid}/nodes/{g['id']}/progress?status=mastered").status_code == 200
+    save(c, sid, {"base_version": cv["version"], "update_nodes": [{"id": g["id"], "position_x": 5000, "position_y": 5000}]})
+    w = c.get(f"/subjects/{sid}/workspace").json()
+    assert w["progress"][g["id"]] == "mastered"
+    assert len(next(n for n in w["roadmap"] if n["id"] == g["id"])["test_ids"]) == 2
+
+
+def test_replace_path_keeps_canvas_only_blocks(course):
+    c, sid = course
+    cv = canvas(c, sid)
+    r = save(c, sid, {"base_version": cv["version"], "create_nodes": [{"client_id": "n", "node_type": "note", "title": "Mine", "position_x": -999}]})
+    note_id = r.json()["id_map"]["n"]
+    assert c.put(f"/subjects/{sid}/content/path", json={"lessons": [{"title": "Only", "content": "x"}]}).status_code == 200
+    after = canvas(c, sid)
+    titles = {n["title"] for n in after["nodes"]}
+    assert titles == {"Only", "Mine"} and after["version"] > r.json()["version"]
+    only = next(n for n in after["nodes"] if n["title"] == "Only")
+    assert only["position_y"] > -999 and note_id in {n["id"] for n in after["nodes"]}
+
+
+def test_single_edge_routes(course):
+    c, sid = course
+    cv = canvas(c, sid)
+    a, b = cv["nodes"][0]["id"], cv["nodes"][-1]["id"]
+    r = c.post(f"/subjects/{sid}/edges", json={"source_node_id": a, "target_node_id": b, "edge_type": "tests", "label": "quiz"})
+    assert r.status_code == 201, r.text
+    eid = r.json()["id"]
+    assert c.post(f"/subjects/{sid}/edges", json={"source_node_id": a, "target_node_id": a}).status_code == 422
+    r = c.put(f"/subjects/{sid}/edges/{eid}", json={"edge_type": "references", "label": None})
+    assert r.json()["edge_type"] == "references" and r.json()["label"] is None
+    assert c.delete(f"/subjects/{sid}/edges/{eid}").status_code == 204
+    assert eid not in {e["id"] for e in canvas(c, sid)["edges"]}
+
+
+def test_add_milestone_gets_a_position_and_edge(course):
+    c, sid = course
+    cv = canvas(c, sid)
+    g = next(n for n in cv["nodes"] if n["title"] == "Greetings")
+    r = c.post(f"/subjects/{sid}/nodes", json={"title": "Child", "parent_node_id": g["id"]})
+    assert r.status_code == 201
+    child = r.json()
+    assert child["position_x"] == g["position_x"] + 340 and child["node_type"] == "material"
+    assert any(e["source_node_id"] == g["id"] and e["target_node_id"] == child["id"] for e in canvas(c, sid)["edges"])

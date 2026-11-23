@@ -15,7 +15,7 @@ insert it in one flush.
 """
 from datetime import date, datetime, timezone
 from uuid import UUID as PythonUUID, uuid4
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, ForeignKeyConstraint, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, ForeignKeyConstraint, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from .database import Base
@@ -45,6 +45,7 @@ class Subject(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     target_level: Mapped[str | None] = mapped_column(String(32))
+    canvas_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -63,6 +64,31 @@ class RoadmapNode(Base):
     level: Mapped[str | None] = mapped_column(String(32))
     order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     content_markdown: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # Canvas (migration 0007). node_type 'material' = a lesson; the others live only on the canvas.
+    position_x: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    position_y: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    width: Mapped[float | None] = mapped_column(Float)
+    height: Mapped[float | None] = mapped_column(Float)
+    node_type: Mapped[str] = mapped_column(String(16), nullable=False, default="material")
+    meta: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict)  # "metadata" is reserved on ORM classes
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class RoadmapEdge(Base):
+    """A connection between two blocks of the same subject (visual/semantic only, never a lock)."""
+    __tablename__ = "roadmap_edges"
+    __table_args__ = (
+        ForeignKeyConstraint(["subject_id", "source_node_id"], ["roadmap_nodes.subject_id", "roadmap_nodes.id"], name="fk_roadmap_edges_source", ondelete="CASCADE"),
+        ForeignKeyConstraint(["subject_id", "target_node_id"], ["roadmap_nodes.subject_id", "roadmap_nodes.id"], name="fk_roadmap_edges_target", ondelete="CASCADE"),
+    )
+    id: Mapped[PythonUUID] = uuid_pk()
+    subject_id: Mapped[PythonUUID] = mapped_column(UUID(as_uuid=True), ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False)
+    source_node_id: Mapped[PythonUUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    target_node_id: Mapped[PythonUUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    edge_type: Mapped[str] = mapped_column(String(16), nullable=False, default="default")
+    label: Mapped[str | None] = mapped_column(String(255))
+    meta: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

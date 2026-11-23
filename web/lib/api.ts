@@ -29,7 +29,9 @@ export async function api<T=any>(path: string, init?: RequestInit): Promise<T> {
     if (res.status === 401 && typeof window !== "undefined" && path !== "/auth/login" && path !== "/auth/register" && path !== "/auth/me") {
       window.dispatchEvent(new Event("omnilearn:unauthorized"));
     }
-    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    const err: Error & { status?: number; body?: any } = new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    err.status = res.status; // callers such as the canvas autosave react to 409 / 422
+    throw err;
   }
   if (res.status === 204) return undefined as T;
   return res.json();

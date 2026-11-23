@@ -4,7 +4,8 @@ Bulk study material goes through app/bundle.py instead. No request accepts an
 ID for a new item: the server generates every ID. Extra fields (for example an
 "id" an older client still sends) are ignored.
 """
-from typing import Annotated, Any
+import json
+from typing import Annotated, Any, Literal
 from uuid import UUID
 from pydantic import AfterValidator, BaseModel, Field, field_validator, model_validator
 
@@ -172,3 +173,85 @@ class BulkIdsIn(BaseModel):
 
 class RoadmapLayoutIn(BaseModel):
     nodes: list[NodePlacement] = Field(min_length=1, max_length=2000)
+
+
+# ---------------------------------------------------------------- canvas
+
+NodeType = Literal["material", "topic", "quiz", "note", "resource"]
+EdgeType = Literal["default", "related_to", "explains", "prerequisite", "references", "tests"]
+Coord = Annotated[float, Field(ge=-1_000_000, le=1_000_000)]
+Size = Annotated[float, Field(ge=20, le=5000)]
+
+
+def _small_meta(value: dict | None) -> dict | None:
+    if value is not None and len(json.dumps(value)) > 50_000:
+        raise ValueError("metadata is too large (50 KB at most)")
+    return value
+
+
+Meta = Annotated[dict[str, Any], AfterValidator(_small_meta)]
+
+
+class CanvasNodeCreate(BaseModel):
+    client_id: str = Field(min_length=1, max_length=64)
+    node_type: NodeType = "material"
+    title: str = Field(default="", max_length=255)
+    level: str | None = Field(default=None, max_length=32)
+    content_markdown: str = Field(default="", max_length=200_000)
+    copy_of: UUID | None = None  # duplicate a lesson: its text and level are copied on the server
+    position_x: Coord = 0
+    position_y: Coord = 0
+    width: Size | None = None
+    height: Size | None = None
+    metadata: Meta = Field(default_factory=dict)
+
+
+class CanvasNodePatch(BaseModel):
+    """Only the fields that are sent change."""
+    id: UUID
+    title: str | None = Field(default=None, max_length=255)
+    level: str | None = Field(default=None, max_length=32)
+    position_x: Coord | None = None
+    position_y: Coord | None = None
+    width: Size | None = None
+    height: Size | None = None
+    metadata: Meta | None = None
+
+
+class CanvasEdgeCreate(BaseModel):
+    client_id: str | None = Field(default=None, max_length=64)
+    source: str = Field(min_length=1, max_length=64)  # a block id, or the client_id of a block created in this batch
+    target: str = Field(min_length=1, max_length=64)
+    edge_type: EdgeType = "default"
+    label: str | None = Field(default=None, max_length=255)
+    metadata: Meta = Field(default_factory=dict)
+
+
+class CanvasEdgePatch(BaseModel):
+    id: UUID
+    edge_type: EdgeType | None = None
+    label: str | None = Field(default=None, max_length=255)
+
+
+class CanvasBatchIn(BaseModel):
+    base_version: int = Field(ge=0)
+    create_nodes: list[CanvasNodeCreate] = Field(default_factory=list, max_length=1000)
+    update_nodes: list[CanvasNodePatch] = Field(default_factory=list, max_length=10_000)
+    delete_nodes: list[UUID] = Field(default_factory=list, max_length=5000)
+    create_edges: list[CanvasEdgeCreate] = Field(default_factory=list, max_length=5000)
+    update_edges: list[CanvasEdgePatch] = Field(default_factory=list, max_length=5000)
+    delete_edges: list[UUID] = Field(default_factory=list, max_length=10_000)
+
+
+class EdgeIn(BaseModel):
+    source_node_id: UUID
+    target_node_id: UUID
+    edge_type: EdgeType = "default"
+    label: str | None = Field(default=None, max_length=255)
+    metadata: Meta = Field(default_factory=dict)
+
+
+class EdgeUpdate(BaseModel):
+    edge_type: EdgeType | None = None
+    label: str | None = Field(default=None, max_length=255)
+    metadata: Meta | None = None

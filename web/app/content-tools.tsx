@@ -17,7 +17,7 @@ export type Part = "path" | "vocabulary" | "readings" | "phrases";
 
 const LABEL: Record<Part, string> = { path: "learning path", vocabulary: "vocabulary", readings: "reading texts", phrases: "dictation phrases" };
 const WARN: Record<Part, string> = {
-  path: "Saving replaces every lesson and every question of this subject with this JSON. Lessons or questions you removed are deleted for good, together with their answers, mistakes and lesson progress.",
+  path: "Saving replaces every lesson and every question of this subject with this JSON. ALL lessons are recreated with new ids, so every answer, mistake, lesson progress, favourite and canvas position and connection of a lesson is deleted for good (notes, topics, resources and quizzes on the canvas stay). To add material without losing anything, use Import instead.",
   vocabulary: "Saving replaces all vocabulary cards with this JSON. Removed words are deleted for good, together with their review history.",
   readings: "Saving replaces all reading texts with this JSON. Removed texts and their questions are deleted for good.",
   phrases: "Saving replaces all dictation phrases with this JSON. Removed phrases are deleted for good.",
