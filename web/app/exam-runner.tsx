@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Bookmark, ChevronLeft, ChevronRight, Grid3x3, Search, Star, X } from "lucide-react";
+import { Bookmark, ChevronLeft, ChevronRight, Grid3x3, Search, Settings, Star, X } from "lucide-react";
+import { loadExamSettings, saveExamSettings, type SavedExam } from "@/lib/exam-save";
 
 /*
  * Full-screen exam: one question at a time, flag for review, go back, and a
@@ -19,6 +20,8 @@ type Props = {
   onSubmit: (answers: { id: string; selected: number }[]) => Promise<void>;
   isFavorite?: (id: string) => boolean;
   onToggleFavorite?: (id: string) => void;
+  initial?: Pick<SavedExam, "idx" | "left" | "answers" | "flags" | "struck">; // a test being continued
+  onProgress?: (s: Pick<SavedExam, "idx" | "left" | "answers" | "flags" | "struck">) => void;
   onClose: () => void;
 };
 type Filter = "all" | "unanswered" | "flagged";
@@ -26,15 +29,18 @@ type Filter = "all" | "unanswered" | "flagged";
 const letter = (i: number) => String.fromCharCode(65 + i);
 const clock = (s: number) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
-export default function ExamRunner({ title, questions, timedSeconds, sectionOf, onSubmit, isFavorite, onToggleFavorite, onClose }: Props) {
-  const [idx, setIdx] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, number>>({});
-  const [flags, setFlags] = useState<Set<string>>(new Set());
-  const [struck, setStruck] = useState<Record<string, number[]>>({});
+export default function ExamRunner({ title, questions, timedSeconds, sectionOf, onSubmit, isFavorite, onToggleFavorite, initial, onProgress, onClose }: Props) {
+  const [idx, setIdx] = useState(initial?.idx ?? 0);
+  const [answers, setAnswers] = useState<Record<string, number>>(initial?.answers ?? {});
+  const [flags, setFlags] = useState<Set<string>>(new Set(initial?.flags ?? []));
+  const [struck, setStruck] = useState<Record<string, number[]>>(initial?.struck ?? {});
+  const [gear, setGear] = useState(false);
+  const [showAnswer, setShowAnswer] = useState(false);
+  useEffect(() => setShowAnswer(loadExamSettings().showAnswer), []);
   const [drawer, setDrawer] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
-  const [left, setLeft] = useState(timedSeconds);
+  const [left, setLeft] = useState(initial?.left ?? timedSeconds);
   const [phase, setPhase] = useState<"run" | "done">("run");
   const [saving, setSaving] = useState(false);
   const [resultFilter, setResultFilter] = useState<"wrong" | "all">("wrong");
@@ -43,6 +49,13 @@ export default function ExamRunner({ title, questions, timedSeconds, sectionOf, 
   latest.current = { answers, phase };
   const total = questions.length;
   const q = questions[idx];
+  const progressRef = useRef(onProgress);
+  progressRef.current = onProgress;
+  const tick = Math.floor(left / 10);
+  useEffect(() => {   // keep the half-finished test so it can be continued from the Test center
+    if (phase === "run") progressRef.current?.({ idx, left, answers, flags: [...flags], struck });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idx, answers, flags, struck, tick, phase]);
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -73,7 +86,7 @@ export default function ExamRunner({ title, questions, timedSeconds, sectionOf, 
 
   const answered = Object.keys(answers).length;
   const go = (i: number) => { setIdx(Math.max(0, Math.min(total - 1, i))); setDrawer(false); };
-  const pick = (i: number) => { if (phase === "run" && q) setAnswers(a => ({ ...a, [q.id]: i })); };
+  const pick = (i: number) => { if (phase === "run" && q && !(showAnswer && answers[q.id] !== undefined)) setAnswers(a => ({ ...a, [q.id]: i })); };   // with answers shown, a revealed question is final
   const toggleFlag = () => q && setFlags(f => { const n = new Set(f); n.has(q.id) ? n.delete(q.id) : n.add(q.id); return n; });
   const strike = (i: number) => q && setStruck(s => {
     const cur = s[q.id] || [];
@@ -82,7 +95,7 @@ export default function ExamRunner({ title, questions, timedSeconds, sectionOf, 
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (phase !== "run" || drawer || confirmFinish) { if (e.key === "Escape") { setDrawer(false); setConfirmFinish(false); } return; }
+      if (phase !== "run" || drawer || confirmFinish || gear) { if (e.key === "Escape") { setDrawer(false); setConfirmFinish(false); setGear(false); } return; }
       if ((e.target as HTMLElement)?.tagName === "INPUT") return;
       if (e.key === "ArrowRight") go(idx + 1);
       else if (e.key === "ArrowLeft") go(idx - 1);
@@ -153,6 +166,7 @@ export default function ExamRunner({ title, questions, timedSeconds, sectionOf, 
   const isFlagged = flags.has(q.id);
   const section = sectionOf?.(q) || "";
   const last = idx === total - 1;
+  const reveal = showAnswer && mine !== undefined;
 
   return createPortal(
     <div className="ex" role="dialog" aria-modal="true" aria-label={title}>
@@ -162,7 +176,16 @@ export default function ExamRunner({ title, questions, timedSeconds, sectionOf, 
         <span className="ex-count">{answered}/{total}</span>
         {timedSeconds > 0 && <span className={`ex-timer ${left < 60 ? "low" : ""}`}>{clock(Math.max(left, 0))}</span>}
         <button className="btn small" onClick={() => setConfirmFinish(true)}>Finish</button>
-        <button className="vp-icon ex-x" aria-label="Quit" onClick={() => { if (window.confirm("Quit this test? Your answers will not be saved.")) onClose(); }}><X size={20} /></button>
+        <button className="vp-icon ex-x" aria-label="Test settings" aria-expanded={gear} onClick={() => setGear(g => !g)}><Settings size={19} /></button>
+        <button className="vp-icon ex-x" aria-label="Quit" onClick={() => { if (window.confirm("Leave this test? Your answers are kept: use Continue last attempt in the Test center.")) onClose(); }}><X size={20} /></button>
+        {gear && (
+          <div className="ex-gear" role="dialog" aria-label="Test settings">
+            <label className="ex-gear-row">
+              <input type="checkbox" checked={showAnswer} onChange={e => { setShowAnswer(e.target.checked); saveExamSettings({ showAnswer: e.target.checked }); }} />
+              <span><strong>Show the correct answer right away</strong><small>After you pick, the right answer and the explanation appear and that question is locked.</small></span>
+            </label>
+          </div>
+        )}
       </header>
 
       <div className="ex-scroll">
@@ -185,7 +208,7 @@ export default function ExamRunner({ title, questions, timedSeconds, sectionOf, 
           <div className="ex-hint"><span>Select one answer</span><span className="ex-hint-tip">Tip: ✕ crosses out a choice</span></div>
           <div className="ex-options" role="radiogroup" aria-label="Answers">
             {q.options.map((o, i) => (
-              <div key={i} className={`ex-opt ${mine === i ? "chosen" : ""} ${gone.includes(i) ? "struck" : ""}`}>
+              <div key={i} className={`ex-opt ${reveal ? (i === q.correct_index ? "reveal-right" : mine === i ? "reveal-wrong" : "") : mine === i ? "chosen" : ""} ${gone.includes(i) ? "struck" : ""}`}>
                 <button type="button" role="radio" aria-checked={mine === i} className="ex-opt-main" onClick={() => pick(i)}>
                   <span className="ex-letter">{letter(i)}</span><span className="ex-opt-text">{o}</span>
                 </button>
@@ -193,6 +216,11 @@ export default function ExamRunner({ title, questions, timedSeconds, sectionOf, 
               </div>
             ))}
           </div>
+          {reveal && (
+            <div className={`feedback ${mine === q.correct_index ? "correct" : "wrong"}`} role="status">
+              {mine === q.correct_index ? "Correct." : `Not quite. The correct answer is ${letter(q.correct_index)}.`}{q.explanation ? ` ${q.explanation}` : ""}
+            </div>
+          )}
         </article>
       </div>
 

@@ -1049,3 +1049,17 @@ input[type=checkbox]{width:18px;height:18px;flex:none}
 .cp-pal.on{outline:2px solid var(--ink);outline-offset:1px;position:relative;z-index:1}
 .cp-custom{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--ink-2);text-transform:none;letter-spacing:0}
 .cp-custom input{width:44px;height:30px;padding:0;border:1px solid var(--line-strong);border-radius:var(--r-sm);background:none}
+
+.ex-top{position:relative}
+.ex-gear{position:absolute;right:10px;top:calc(100% + 6px);z-index:30;width:min(340px,calc(100vw - 20px));background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:0 12px 32px rgb(0 0 0/.22);padding:12px}
+.ex-gear-row{display:flex;gap:12px;align-items:flex-start;cursor:pointer;font-size:15px}
+.ex-gear-row input{width:20px;height:20px;margin-top:2px;flex:none}
+.ex-gear-row small{display:block;color:var(--muted);font-size:12.5px;margin-top:3px}
+.ex-opt.reveal-right{border-color:var(--success);background:var(--success-soft)}
+.ex-opt.reveal-wrong{border-color:var(--danger);background:var(--danger-soft)}
+.ex-opt.reveal-right .ex-letter{background:var(--success);color:#fff}
+.ex-opt.reveal-wrong .ex-letter{background:var(--danger);color:#fff}
+.ex-card .feedback{margin-top:14px}
+
+.tc-resume{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;padding:14px 16px;margin-bottom:14px;border-color:var(--primary);background:var(--primary-soft)}
+.tc-resume-actions{display:flex;gap:8px;flex-wrap:wrap}
