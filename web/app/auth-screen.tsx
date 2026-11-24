@@ -1,10 +1,11 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, json } from "@/lib/api";
 import type { User } from "./types";
 
 export default function AuthScreen({onAuthenticated}:{onAuthenticated:(user:User)=>void}) {
   const [mode,setMode]=useState<"create"|"login">("create");
+  useEffect(()=>{try{if(localStorage.getItem("omnilearn.hasAccount")==="1")setMode("login")}catch{}},[]);
   const [email,setEmail]=useState("");
   const [fullName,setFullName]=useState("");
   const [password,setPassword]=useState("");
@@ -14,6 +15,7 @@ export default function AuthScreen({onAuthenticated}:{onAuthenticated:(user:User
     e.preventDefault();setBusy(true);setError("");
     try {
       const result=await api<{user:User}>(mode==="create"?"/auth/register":"/auth/login",json("POST",mode==="create"?{email,full_name:fullName,password}:{email,password}));
+      try{localStorage.setItem("omnilearn.hasAccount","1")}catch{}
       onAuthenticated(result.user);
     } catch(err:any) { setError(err.message||"Could not sign in."); }
     finally { setBusy(false); }
