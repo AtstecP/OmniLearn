@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import Markdown from "./markdown";
 import { Bookmark, ChevronLeft, ChevronRight, Grid3x3, Search, Settings, Star, X } from "lucide-react";
 import { loadExamSettings, saveExamSettings, type SavedExam } from "@/lib/exam-save";
 
@@ -144,16 +145,16 @@ export default function ExamRunner({ title, questions, timedSeconds, sectionOf, 
           {shown.length === 0 && <div className="empty-state"><strong>Perfect score</strong>Nothing to review.</div>}
           {shown.map(({ x, i, mine }) => (
             <article className="question-card" key={x.id}>
-              <h3>{i + 1}. {x.prompt}</h3>
+              <h3 className="ex-q-row">{i + 1}. <Markdown compact text={x.prompt} /></h3>
               {x.options.map((o, j) => (
                 <div key={j} className={`ex-opt static ${j === x.correct_index ? "correct" : j === mine ? "wrong" : ""}`}>
-                  <span className="ex-letter">{letter(j)}</span><span>{o}</span>
+                  <span className="ex-letter">{letter(j)}</span><span><Markdown compact text={o} /></span>
                   {j === x.correct_index && <small className="ex-tag">Correct answer</small>}
                   {j === mine && j !== x.correct_index && <small className="ex-tag">Your answer</small>}
                 </div>
               ))}
               {mine === undefined && <div className="feedback wrong">Not answered.</div>}
-              {x.explanation && <div className="feedback correct">{x.explanation}</div>}
+              {x.explanation && <div className="feedback correct"><Markdown compact text={x.explanation} /></div>}
             </article>
           ))}
         </div></div>
@@ -204,13 +205,13 @@ export default function ExamRunner({ title, questions, timedSeconds, sectionOf, 
             </button>
             </div>
           </div>
-          <h2 className="ex-prompt">{q.prompt}</h2>
+          <h2 className="ex-prompt"><Markdown compact text={q.prompt} /></h2>
           <div className="ex-hint"><span>Select one answer</span><span className="ex-hint-tip">Tip: ✕ crosses out a choice</span></div>
           <div className="ex-options" role="radiogroup" aria-label="Answers">
             {q.options.map((o, i) => (
               <div key={i} className={`ex-opt ${reveal ? (i === q.correct_index ? "reveal-right" : mine === i ? "reveal-wrong" : "") : mine === i ? "chosen" : ""} ${gone.includes(i) ? "struck" : ""}`}>
                 <button type="button" role="radio" aria-checked={mine === i} className="ex-opt-main" onClick={() => pick(i)}>
-                  <span className="ex-letter">{letter(i)}</span><span className="ex-opt-text">{o}</span>
+                  <span className="ex-letter">{letter(i)}</span><span className="ex-opt-text"><Markdown compact text={o} /></span>
                 </button>
                 <button type="button" className="ex-strike" aria-label={gone.includes(i) ? "Restore choice" : "Cross out choice"} onClick={() => strike(i)}><X size={15} /></button>
               </div>
@@ -218,7 +219,7 @@ export default function ExamRunner({ title, questions, timedSeconds, sectionOf, 
           </div>
           {reveal && (
             <div className={`feedback ${mine === q.correct_index ? "correct" : "wrong"}`} role="status">
-              {mine === q.correct_index ? "Correct." : `Not quite. The correct answer is ${letter(q.correct_index)}.`}{q.explanation ? ` ${q.explanation}` : ""}
+              <strong>{mine === q.correct_index ? "Correct." : `Not quite. The correct answer is ${letter(q.correct_index)}.`}</strong>{q.explanation ? <Markdown compact text={q.explanation} /> : null}
             </div>
           )}
         </article>

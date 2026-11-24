@@ -889,3 +889,15 @@ input[type=checkbox]{width:18px;height:18px;flex:none}
 
 .tc-resume{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;padding:14px 16px;margin-bottom:14px;border-color:var(--primary);background:var(--primary-soft)}
 .tc-resume-actions{display:flex;gap:8px;flex-wrap:wrap}
+
+/* Markdown inside test questions, answers and explanations */
+.md-q{min-width:0;font:inherit;color:inherit;overflow-wrap:anywhere}
+.md-q p{margin:0 0 8px}
+.md-q pre{margin:6px 0 8px;font-size:13.5px;text-align:left}
+.md-q code{background:var(--surface-2);padding:1px 5px;border-radius:5px;font-size:.92em}
+.md-q pre code{background:transparent;padding:0}
+.md-q ul,.md-q ol{margin:0 0 8px}
+.md-q strong{color:inherit}
+.ex-q-row{display:flex;gap:6px;align-items:baseline}
+.ex-opt-text,.quiz-btn>span:last-child{min-width:0;flex:1}
+.mistake-q{flex:1;min-width:0}

@@ -1,5 +1,6 @@
 "use client";
 import { Play } from "lucide-react";
+import Markdown from "./markdown";
 
 /*
  * Mistake notebook: every question whose latest answer was wrong. "Start test" runs the
@@ -26,7 +27,7 @@ export default function Mistakes({ items, onStart }: { items: MistakeItem[]; onS
       <div className="mistake-list">
         {items.map(({ question: q, failures }) => (
           <div className="mistake-row" key={q.id}>
-            <span>{q.prompt}</span>
+            <div className="mistake-q"><Markdown compact text={q.prompt} /></div>
             <span className="tag">Missed {failures}×</span>
           </div>
         ))}

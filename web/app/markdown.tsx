@@ -42,9 +42,9 @@ export function fixTables(text: string): string {
   return out.join("\n");
 }
 
-export default function Markdown({ text }: { text: string }) {
+export default function Markdown({ text, compact }: { text: string; compact?: boolean }) {
   return (
-    <div className="md">
+    <div className={compact ? "md md-q" : "md"}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{

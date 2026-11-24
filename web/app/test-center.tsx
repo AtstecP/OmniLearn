@@ -1,6 +1,7 @@
 "use client";
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Play, Trash2 } from "lucide-react";
+import Markdown from "./markdown";
 
 /*
  * Test center: questions grouped by lesson ("categories"), a custom-test builder
@@ -193,7 +194,7 @@ export default function TestCenter<T extends Q>({ nodes, questions, busy, onStar
                         <div className="test-row" key={q.id}>
                           {manage && <input type="checkbox" className="tc-pick" checked={picked.has(q.id)} onChange={() => setPicked(prev => toggle(prev, q.id))} aria-label="Select this question to delete" />}
                           <div>
-                            <div className="test-prompt">{q.prompt}</div>
+                            <div className="test-prompt"><Markdown compact text={q.prompt} /></div>
                             {!!q.tags?.length && <div className="test-tags">{q.tags.map(x => <span className="tag" key={x}>{x}</span>)}</div>}
                           </div>
                           <div className="row-actions">
