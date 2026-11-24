@@ -12,7 +12,7 @@ This file is a project handover guide. Treat the user's current request as the t
 - API: FastAPI hosted as a separate Vercel project.
 - Database: PostgreSQL on Neon.
 - Local development: Docker Compose with PostgreSQL, FastAPI, and Next.js.
-- Account creation is the default first screen; returning users can switch to sign-in.
+- Sign-in is the default first screen; new users switch to account creation.
 - Sessions use a signed JWT in an `httpOnly` cookie set by the API. The browser calls the web app's own `/api/*` path, which Next.js proxies to FastAPI, so the cookie is first-party and JavaScript never sees the token.
 - The Git repository root is this `OmniLearn/` folder (GitHub `AtstecP/OmniLearn`); Vercel roots are `api` and `web`.
 
@@ -119,7 +119,7 @@ The original specification also describes richer roadmap graph visualization, au
 
 ## Authentication and account ownership
 
-1. First visit defaults to account creation; the user can switch to sign-in.
+1. First visit defaults to sign-in; the user can switch to account creation.
 2. `POST /auth/register` accepts normalized email, full name, and a password of at least 12 characters. Passwords are hashed with Argon2.
 3. `POST /auth/login` (and register) verifies the password and sets a signed HS256 JWT in the `omnilearn_session` cookie: `httpOnly`, `SameSite=Lax`, `Secure` unless `COOKIE_SECURE=false` (local Docker only). The body holds `expires_in` and public user details, never the token.
 4. The browser calls `/api/...` on the web origin; `web/next.config.ts` rewrites it to `API_ORIGIN`. Same origin means the cookie is first-party.
