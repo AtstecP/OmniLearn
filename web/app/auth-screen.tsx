@@ -4,7 +4,7 @@ import { api, json } from "@/lib/api";
 import type { User } from "./types";
 
 export default function AuthScreen({onAuthenticated}:{onAuthenticated:(user:User)=>void}) {
-  const [mode,setMode]=useState<"create"|"login">("create");
+  const [mode,setMode]=useState<"create"|"login">("login");
   const [email,setEmail]=useState("");
   const [fullName,setFullName]=useState("");
   const [password,setPassword]=useState("");
